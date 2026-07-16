@@ -1,0 +1,11 @@
+#!/bin/bash -l
+#SBATCH --time=3:00:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=128
+#SBATCH --mem=80G
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=mill9614@umn.edu
+
+module load python3
+source activate millcpu
+python ./metrics/exp3/exp3-msi.py --workers 128 --numMocks 10000

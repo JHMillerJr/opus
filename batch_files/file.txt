@@ -1,0 +1,11 @@
+#!/bin/bash -l
+#SBATCH --time=12:00:00
+#SBATCH --ntasks=10
+#SBATCH --mem=8g
+#SBATCH --tmp=8g
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=mill9614@umn.edu
+
+module load python3
+source activate mill
+python ./metrics/exp1/exp1-msi.py

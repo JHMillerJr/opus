@@ -1,0 +1,11 @@
+#!/bin/bash -l
+#SBATCH --time=02:00:00
+#SBATCH --ntasks=1
+#SBATCH --mem=128g
+#SBATCH --tmp=128g
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=mill9614@umn.edu
+
+module load python3
+source activate millcpu
+python ./metrics/param_correl.py
