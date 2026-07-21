@@ -54,7 +54,7 @@ def paramRanges():
                       {'m': 1,  # m num
                        'x0':    {'init':0.0, 'min':-0.1, 'max': 0.1, 'fit': False},   # x center of profile 
                        'y0':    {'init':0.0, 'min':-0.1, 'max': 0.1, 'fit': False},   # y center of profile
-                       'norm':  {'init':1e-1, 'min': 0.0, 'max':0.05, 'fit': False},    # normalization []
+                       'norm':  {'init':5e-3, 'min': 0.0, 'max':0.05, 'fit': False},    # normalization []
                        'slope': {'init': 2.0, 'min': 2.0, 'max': 2.0, 'fit': False},   # slope []
                        'theta': {'init':0.0, 'min': 0.0, 'max': 90,  'fit': False},    # position angle [deg]
                        'add': True},
@@ -149,6 +149,13 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True, cov=None, mu=None, ub
     #> number of varied parameters
     d = len(varied_params) # num dims
     
+    #> print the varied params
+    if True:
+        print(f'> The varied params are:')
+        for var in varied_params:
+            print(f'>   {var[0]}, {var[1]}, {var[2]}')
+        print()
+    
     #> IM NOT SURE IF I NEED THIS OR IF EVERYTHING AFTER THIS WILL BE OKAY WITH D=0 (i think it's okay)
     if d: # if there are varied parameters (otherwise can skip)
         
@@ -174,6 +181,7 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True, cov=None, mu=None, ub
                 print('> The mean vector is:\n', mu)
                 print('> The covariance matrix is:\n', cov)
                 print('> The standard deviation vector is:\n', np.diag(cov)**0.5)
+                print()
             
             #> sampling from the truncated multivariate normal distribution
             tmvn = TruncatedMVN(mu, cov, lb, ub)

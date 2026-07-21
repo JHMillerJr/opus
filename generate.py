@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import numpy as np
+from datetime import datetime
 
 #> terminal imports
 import argparse
@@ -37,16 +38,41 @@ maxTries = 100
 #> returns plot dictionary
 def getPlotDict(atleast_one_plot=True, **kwargs):
     
+    #> imports
     import copy
 
     #> default plotting dict
-    plotDict = {'kappa': True, 'deflect': False, 'caustics': True, 'caustics_zoom': 1}
+    plotDict = {'kappa': kwargs.get('kappa', True), 
+                'deflect': kwargs.get('deflect', False), 
+                'caustics': kwargs.get('caustics', True), 
+                'caustics_zoom': kwargs.get('caustics_zoom', False)}
     
     #> making all false if wanted
     if not atleast_one_plot:
         plotDict = dict.fromkeys(plotDict, False)
     
-    return copy(plotDict)
+    return copy.copy(plotDict)
+
+
+#> returns the save dictionary
+def getSaveDict(atleast_one_save=True, **kwargs):
+    
+    #> imports
+    import copy
+
+    #> default plotting dict
+    saveDict = {'images': kwargs.get('images', True), 
+                'im_obs': kwargs.get('im_obs', True), 
+                'im_mags': kwargs.get('im_mags', False), 
+                'sources': kwargs.get('sources', True),
+                'lens': kwargs.get('lens', False), 
+                'bprofiles': kwargs.get('bprofiles', True)}
+    
+    #> making all false if wanted
+    if not atleast_one_save:
+        saveDict = dict.fromkeys(saveDict, False)
+    
+    return copy.copy(saveDict)
 
 
 """ #> MEMORY CALC ===================
@@ -79,29 +105,45 @@ def grid(**kwargs):
 ================================== """
 
 #> returns random redshifts
-def ranRedshifts(num, **kwargs):
+def ranRedshifts(numGals, **kwargs):
     
     ### THESE SHOULD BE INFORMED FROM OBSERVATIONS/ THEORY
     ### I CAN DO A FIRST PASS LOOK W/ EINSTEIN RADIUS...? 
     ### OR LENSING PROBABILITY
     
-    #> deflector: lb and ub
-    ub_zl = 1.5
-    lb_zl = 0.1
+    ### should be a joint probability distribution
     
-    #> source: lb and ub
-    ub_zs = 3.0
-    lb_zs = 0.5
+    #> imports
+    from modules.truncated_mvn_sampler.minimax_tilting_sampler import TruncatedMVN    
     
-    #> params on deflector
-    mu_zl = kwargs.get('mu_zl', 0.5)
+    #> correlation matrix
+    R = np.identity(n=2)
+    
+    #> deflector: lb, ub, mu, sigma
+    ub_zl    = kwargs.get('ub_zl', 1.5)
+    lb_zl    = kwargs.get('lb_zl', 0.1)
+    mu_zl    = kwargs.get('mu_zl', 0.5)
     sigma_zl = kwargs.get('mu_zl', 0.1)
     
-    #> params on source
-    mu_zs = kwargs.get('mu_zs', 1.0)
+    #> source: lb, ub, mu, sigma
+    ub_zs    = kwargs.get('ub_zs', 3.0)
+    lb_zs    = kwargs.get('lb_zs', 0.5)
+    mu_zs    = kwargs.get('mu_zs', 1.0)
     sigma_zs = kwargs.get('mu_zs', 0.1)
     
-    return
+    #> constructing params
+    lb = np.array([lb_zl, lb_zs])
+    ub = np.array([ub_zl, ub_zs])
+    mu = np.array([mu_zl, mu_zs])
+    sigma = np.array([sigma_zl, sigma_zs])
+    cov = np.diag(sigma) @ R @ np.diag(sigma) # converting correlation & std vectors to covariance matrix
+    
+    #> drawing samples
+    tmvn = TruncatedMVN(mu, cov, lb, ub)
+    samples = tmvn.sample(numGals)
+    samples = np.array(samples)
+    
+    return samples.T
 
 
 """ #> GALPROFILES ===================
@@ -284,6 +326,208 @@ def genQuad(lens, zs, **kwargs):
 ================================== """
 ###### GAL=CPU OR GPU, QUAD=CPU ######
 
+#> main gal/quad population fn
+def genPop(numGals, **kwargs):
+    
+    ##### ONE MORE KWARGS = SOURCE
+    
+    #> declarations
+    numGals = int(numGals)                          # number of galaxies to generate
+    numSource_gal = kwargs.get('numSource_gal', 1)  # number of sources per galaxy
+
+    #>>># unpacking kwargs
+    
+    #> output kwargs
+    verbose  = kwargs.get('verbose', False)                                # printing important 
+    saveFlag = kwargs.get('save', getSaveDict())                           # saving info
+    timeFlag = kwargs.get('time', False)                                   # printing time info
+    plotFlag = kwargs.get('plot', getPlotDict(atleast_one_plot=False))     # flag of wether to plot or not
+    folder   = kwargs.get('folder', '+unsorted')                           # data output folder
+    suffix   = kwargs.get('suffix', '')                                    # suffix to file name
+    if folder is None: folder = '+unsorted'                                # fail safe for default output dir
+    
+    #> grid kwargs
+    scale_factor = kwargs.get('scale_factor', 1)                           # a way to increase (or decrease) the grid resolution
+    pix_arc = [kwargs.get('pix_arc', u.pix_arc) * scale_factor] * numGals  # pixel per arcsec conversion
+    nph = kwargs.get('nph', u.nph)              * scale_factor             # width / 2 of grid
+    
+    #> galaxy properties kwargs
+    nfw  = kwargs.get('nfw', True)                # if want nfw profile
+    hern = kwargs.get('hern', True)               # if want hernquist profile
+    mult = kwargs.get('mult', [])                 # multipoles requested to be in the galaxies
+    ex   = kwargs.get('ex', False)                # if want external shear
+    galProfs = kwargs.get('galProfs', galProfiles(nfw=nfw, hern=hern, mult=mult, ex=ex)) # default galaxy profiles
+    bprofiles = kwargs.get('bprofiles', None)                                   # bprofiles
+    redshifts = kwargs.get('redshifts', ranRedshifts(numGals))                  # randomized default redshifts (might result in NCGs)
+    if isinstance(redshifts, tuple): redshifts = np.array([redshifts] * numGals)# converting redshifts if tuple, i.e., supplied as (zl, zs)
+    uniform = kwargs.get('uniform', False)        # sampling galaxy params uniformly instead of Gaussian
+    lb  = kwargs.get('lb', None)                  # lower bounds for galaxy params (i.e., bprofiles)
+    ub  = kwargs.get('ub', None)                  # upper bounds for galaxy params
+    mu  = kwargs.get('mu', None)                  # mu vector for galaxy params
+    cov = kwargs.get('cov', None)                 # covariance matrix for galaxy params]
+    
+    #> image properties kwargs
+    jims = kwargs.get('jims', None)               # number of images wanted from lens
+    mags = kwargs.get('mags', saveFlag['im_mags'])# if wanting image magnifications
+    observables = kwargs.get('observables', None) # lensing observables
+    
+    #> checking if requesting, but not saving (or vice-versa)
+    if mags and not saveFlag['im_mags']:
+        error.highlight('Requesting mags without requesting to save them. Changing saveFlag[im_mags]=True')
+        saveFlag['im_mags'] = True
+    if observables is None and saveFlag['im_obs']:
+        error.highlight('Requesting observables without supply which ones. Changing saveFlag[im_obs]=False')
+        saveFlag['im_obs'] = False
+    
+    #> computation kwargs
+    gpu = kwargs.get('gpu', False) # if should use GPU (or CPU) [currently broken]
+    
+    #> converting to np arrays
+    to_convert = [lb, ub, mu, cov]
+    for i, var in enumerate(to_convert):
+        if var is not None:
+            to_convert[i] = np.asarray(var)
+    lb, ub, mu, cov = to_convert
+    
+    #<<<# finished unpacking kwargs
+    
+    #> file information
+    if folder != '' and folder[-1] != '/': folder += '/' # formatting, if necessary
+    dirPath = dataDir + folder                           # main outFile path
+    dt = str(int( (datetime.now().second*1e3 + datetime.now().microsecond/1e4) / 10 )).zfill(4) # second + millisecond info
+    fileName = time.strftime('%y%m%d%H%M', time.localtime())
+    fileName += dt + suffix                              # file date information 
+    
+    #> print statement
+    galProfs_print = []
+    for key in galProfs.keys():
+        if galProfs[key]: 
+            if isinstance(galProfs[key], list):
+                if len(galProfs[key]) > 0: 
+                    galProfs_print.extend([ 'm'+str(x) for x in galProfs[key] ])
+                    continue
+            galProfs_print.append(key)
+    print(f'> Starting generate for {fileName}:')
+    print(f'>   numGals = {numGals} \n>   numSource_gal = {numSource_gal}')
+    print('>   Galaxy components are:', ', '.join(galProfs_print))
+    print()
+    
+    #> generating galaxies (this should cover all possible arguments)
+    srt = time.time()
+    lenses, bprofiles = genGalPop(redshifts,           # (zl, zs) redshifts      [Nx2 np.array]
+                                  galProfs,            # profiles to be included [dic]
+                                  bprofiles=bprofiles, # pre-con bprofiles       [list]
+                                  nph=nph,             # width / 2 for grid      [int]
+                                  pix_arc=pix_arc,     # pixel / arcsec convers. [list]
+                                  uniform=uniform,     # how to sample params    [bool]
+                                  lb=lb,               # lower bounds vector     [None or Nx1 np.array]
+                                  ub=ub,               # upper bounds vector     [None or Nx1 np.array]
+                                  mu=mu,               # mu vector               [None or Nx1 np.array]
+                                  cov=cov,             # covariance matrix       [None or NxN np.array]
+                                  gpu=gpu,             # if using GPU            [bool]
+                                  verbose=verbose)     # if want print info      [bool]
+    if timeFlag: print(f'> Generating galaxies took {time.time()-srt:.2f} s')
+    
+    #<&># object information
+    #> bprofiles = [list]
+    #> lenses = (xgrid, ygrid, delx, dely, lamt)
+    #> xgrid  = (nph*2, nph*2)          [np.ndarray]
+    #> ygrid  = (nph*2, nph*2)          [np.ndarray]
+    #> delx   = (numGals, nph*2, nph*2) [np.ndarray]
+    #> dely   = (numGals, nph*2, nph*2) [np.ndarray]
+    #> lamt   = (numGals, nph*2, nph*2) [np.ndarray]
+    
+    #> generating quads
+    srt = time.time()
+    quadObject = genQuadPop(lenses,                      # lenses object           [list]
+                            zs=redshifts[:,1],           # source redshifts        [Nx1 np.ndarray]
+                            pix_arc=pix_arc,             # pixel / arcsec convers. [list]
+                            numSource_gal=numSource_gal, # num sources per gal     [int]
+                            observables=observables,     # lensing obesrvables     [None or list]
+                            verbose=verbose,             # if want print info      [bool]
+                            mags=mags,                   # if want magnifications  [bool]
+                            jims=jims)                   # num ims per source      [int]
+    if timeFlag: print(f'> Generating quads took {time.time()-srt:.2f} s')
+    
+    #> unpacking quad object
+    images, im_obs, sources, im_mags = quadObject
+    
+    #<&># object information
+    #> quadObject = images, im_obs, sources, im_mags
+    #> images  = (nph*2, nph*2)          [np.ndarray]
+    #> im_obs  = (nph*2, nph*2)          [np.ndarray]
+    #> sources = (numGals, nph*2, nph*2) [np.ndarray]
+    #> im_mags = (numGals, nph*2, nph*2) [np.ndarray]
+    
+    #> saving data
+    if any(saveFlag.values()):
+        
+        #> getting lens information (only stores information of the ONE lens)
+        if saveFlag['lens']:
+            lens_num = 0 # gets maps of this lens
+            lens = np.array([lenses[0],lenses[1],             # xgrid, ygrid
+                             lenses[2][lens_num],             # delx
+                             lenses[3][lens_num],             # dely
+                             lenses[4][lens_num]])            # lamt
+        else: lens = None
+        
+        #> checking other info
+        if not saveFlag['images']: images = None
+        if not saveFlag['im_obs']: im_obs = None
+        if not saveFlag['im_mags']: im_mags = None
+        if not saveFlag['sources']: sources = None
+        if not saveFlag['bprofiles']: bprofiles = None
+        
+        #> saving
+        saveInfo_multipleFiles(dirPath, fileName, suffix, # file/path naming
+                               images=images,             # image positions
+                               im_obs=im_obs,             # image observables
+                               im_mags=im_mags,           # image magnifications
+                               sources=sources,           # source positions
+                               lens=lens,                 # lens info (see above)
+                               bprofiles=bprofiles)       # bprofiles (inclues pix_arc)
+    
+    #> plotting many lenses
+    if any(plotFlag.values()):
+        
+        #> declarations
+        maxPlot = 20
+        
+        #> unpacking info
+        all_pix_arc = pix_arc
+        xgrid, ygrid = lenses[:2]
+        all_delx, all_dely, all_lamt = lenses[2:]
+        
+        #> plotting!
+        for i, delx, dely, lamt, pix_arc, _ in zip(range(numGals), all_delx, all_dely, all_lamt, all_pix_arc, range(maxPlot)):
+            
+            #> getting images
+            ims = np.array([images[i]])
+            
+            #> kappa
+            if plotFlag['kappa']:
+                plot.kappa(xgrid, ygrid, delx, dely, pix_arc, images=ims)
+                
+            #> deflection angles
+            if plotFlag['deflect']:
+                plot.deflect(xgrid, ygrid, delx, dely, images=ims)
+            
+            #> caustics
+            if plotFlag['caustics']:
+                plot.caustics(xgrid, ygrid, delx, dely, pix_arc, images=ims)
+            
+            #> caustic zoom
+            if plotFlag['caustics_zoom']: 
+                zoom = plotFlag['caustics_zoom']    # getting zoom
+                if isinstance(zoom, bool): zoom = 5 # if zoom=True, sets default zoom value
+                plot.caustics(xgrid, ygrid, delx, dely, pix_arc, images=ims, zoom=int(zoom))
+                
+    #> final print
+    print(f'> Done generating {fileName}!')
+    
+    return dirPath + fileName + suffix
+
+
 #> generates a population of galaxies
 def genGalPop(redshifts, galProfiles, **kwargs):
     
@@ -313,7 +557,7 @@ def genGalPop(redshifts, galProfiles, **kwargs):
                                      ub=kwargs.get('ub', None),
                                      lb=kwargs.get('lb', None),
                                      uniform=kwargs.get('uniform', False))
-    
+        
     #> grid declarations
     nph = kwargs.get('nph', u.nph)
     xgrid, ygrid = grid(nph=nph)
@@ -395,7 +639,7 @@ def genQuadPop(lenses, zs, **kwargs):
                 
                 #> if there is no requested number of jims or requesting specific source
                 if requested_jims is None or kwargs.get('source', None) is not None: 
-                    print('changing flag')
+                    # print('changing flag')
                     flag = False
                     
             #> if wanting lensing observables
@@ -418,6 +662,9 @@ def genQuadPop(lenses, zs, **kwargs):
             #> if could not find the number requested
             if numTries == 0:
                 error.highlight(f'Source {i} could not find {requested_jims} images! Last source tried = ({xs},{ys})')
+    
+    #> creating space in prints
+    if verbose: print()
     
     #> to numpy
     images = np.array(images, dtype=object)
@@ -461,7 +708,7 @@ def getMag(lens, pix_arc, images):
 ================================== """
 
 #> saves info to outfile
-def saveInfo(outFile, **kwargs):
+def saveInfo_oneFile(outFile, **kwargs):
     
     #> unpacking kwargs
     images    = kwargs.get('images', None)
@@ -490,6 +737,59 @@ def saveInfo(outFile, **kwargs):
     return
 
 
+#> saves info to outfile
+def saveInfo_multipleFiles(dirPath, fileName, suffix, **kwargs):
+    
+    #> globals
+    global maxTries
+    tries = maxTries
+    
+    #> imports
+    from pathlib import Path
+    
+    #> adding / if needed
+    if dirPath[-1] != '/': dirPath += '/'
+    if fileName[-1] != '/': fileName += '/'
+    
+    #> declarations
+    original_file_name = fileName
+
+    #> checking to see if file name already exists, chooses new time if already exists
+    while os.path.isdir(dirPath + fileName) and tries > 0:
+        
+        #> getting new time
+        dt = str(int( (datetime.now().second*1e3 + datetime.now().microsecond/1e4) / 10 )).zfill(4) # second + millisecond info
+        fileName = time.strftime('%y%m%d%H%M', time.localtime())
+        fileName += dt + suffix + '/'
+        tries -= 1
+    
+    #> printing if file name has changed
+    if tries < maxTries:
+        print(f'> The file {original_file_name} has been changed to {fileName}')
+    
+    #> making directory
+    parent_dir = dirPath + fileName
+    Path(parent_dir).mkdir(parents=True, exist_ok=True)
+    
+    #> unpacking kwargs
+    images    = kwargs.get('images', None)
+    im_obs    = kwargs.get('im_obs', None)
+    im_mags   = kwargs.get('im_mags', None)
+    sources   = kwargs.get('sources', None)
+    lens      = kwargs.get('lens', None)
+    bprofiles = kwargs.get('bprofiles', None)
+    
+    #> saving data
+    if images    is not None and images.size!=0 :  np.save(parent_dir + fileName[:-1] + '_images', images)
+    if im_obs    is not None and im_obs.size!=0 :  np.save(parent_dir + fileName[:-1] + '_obs', im_obs)
+    if im_mags   is not None and im_mags.size!=0 : np.save(parent_dir + fileName[:-1] + '_mags', im_mags)
+    if sources   is not None and sources.size!=0 : np.save(parent_dir + fileName[:-1] + '_srcs', sources)
+    if lens      is not None: np.save(parent_dir + fileName[:-1] + '_lens', lens)
+    if bprofiles is not None: np.save(parent_dir + fileName[:-1] + '_bprofiles', bprofiles)
+
+    return
+
+
 """ #> MAIN ==========================
 ================================== """
 
@@ -497,7 +797,7 @@ def saveInfo(outFile, **kwargs):
 if __name__ == '__main__':
     
     #> name
-    print('> '+os.path.basename(__file__))
+    print('> '+os.path.basename(__file__),'\n')
     
     #> declarations
     printTime = False
@@ -517,99 +817,31 @@ if __name__ == '__main__':
     parser.add_argument('--mult', type=int, nargs='+', default=None, help='adds multipole (can be more than one, separate by space)')
     parser.add_argument('--ex', action='store_true', help='adds external shear')
     parser.add_argument('--suffix', type=str, default='', help='adds suffix to end of file name')
+    parser.add_argument('--folder', type=str, default='+unsorted', help='adds suffix to end of file name')
     args, unknown = parser.parse_known_args()
     args.args = unknown
-    print(args)
+    # print(args)
     
     #> getting galaxy profiles
     if args.mult is None: mult=[]
     else: mult=args.mult
     galProfs = galProfiles(mult=mult, ex=args.ex)
-    galProfs = galProfiles(nfw=True, hern=True, mult=[69], ex=False)
+    galProfs = galProfiles(nfw=True, hern=True, mult=[], ex=False)
     
     #> single galaxy
-    sysConfig = (zl, zs), galProfs, nph, pix_arc
+    # sysConfig = (zl, zs), galProfs, nph, pix_arc
     # singleGal(sysConfig) # options: plotDict(False), numSource_gal, source=(0.0, 0.0)
+    genPop(numGals=10, redshifts=(0.5, 1.0), verbose=True, suffix='', mags=False, mult=[1,3,4], mu=[0,1])
     
-    #> generating galaxy populations
-    gpu = False
-    numGals = 10
-    numSource_gal = 100
-    redshifts = np.array([(zl, zs)] * numGals)
-    pix_arc = [pix_arc] * numGals
-    
-    #> parallelization declarations
-    # numCores = 48
-    # gpuMemory = 64 # gb
-    # print(tobytes(gpuMemory, 'g'))
-    # numProcesses =  min(numCores, int( tobytes(gpuMemory, 'g') / ( numGals * 80000 * 57.5 ) ))
-    # print(numProcesses)
-    
-    print(galProfs)
-    
-    #> getting offset params
-    import cosmology
-    lensplane_offset_kpc = 0.600 
-    mu = np.array([0, 0])
-    print(cosmology.angDist(0, zl))
-    std = np.rad2deg(lensplane_offset_kpc / cosmology.angDist(0, zl) / 10**3) * 3600
-    #cov = np.identity(len(mu)) * (std**2)
-    lb, ub = np.array([-std, -std]), np.array([std, std])
-    
-    #> generating galaxies
-    srt = time.time()
-    lenses, bprofiles = genGalPop(redshifts, galProfs, 
-                                  nph=nph, pix_arc=pix_arc, 
-                                  uniform=True, lb=lb, ub=ub,
-                                  gpu=gpu, verbose=True)#, mu=mu, cov=cov)
-    if printTime: print(f'> Generating galaxies took {time.time()-srt:.2f} s')
-    
-    #> generating quads
-    srt = time.time()
-    images, im_obs, sources, im_mags = genQuadPop(lenses, zs, 
-                                                  pix_arc=pix_arc, 
-                                                  numSource_gal=numSource_gal,
-                                                  observables=observables, 
-                                                  verbose=False, mags=False, 
-                                                  jims=5) # can include observables here (do not if you want magnifictions)
-    if printTime: print(f'> Generating quads took {time.time()-srt:.2f} s')
-    
-    
-    #> saving images
-    # suffix = 'fsq_q0.85_std0.05_fit'
-    suffix = args.suffix
-    # suffix = ''
-    outFile = dataDir+time.strftime('%y%m%d%H%M', time.localtime()) + suffix
-    
-    #> saving
-    if True:
-        lens_num = 0 # gets maps of this lens
-        lens = np.array([lenses[0],lenses[1],  # xgrid, ygrid
-                         lenses[2][lens_num],  # delx
-                         lenses[3][lens_num],  # dely
-                         lenses[4][lens_num]]) # lamt
-        saveInfo(outFile, images=images,       # image positions
-                          im_obs=im_obs,       # image observables
-                          im_mags=im_mags,     # image magnifications
-                          sources=sources,     # source positions
-                          lens=lens,           # lens info (see above)
-                          bprofiles=bprofiles) # bprofiles (inclues pix_arc)
-    
-    # geometry.d3d2(outFile+'.npy')
-     
-    #> loading to ensure it is okay
-    # data, keys = parse.fromNPY(outFile)
-    
-    #> plotting many lenses
-    if True:
-        all_pix_arc = pix_arc
-        xgrid, ygrid = lenses[:2]
-        all_delx, all_dely, all_lamt = lenses[2:]
-        for i, delx, dely, lamt, pix_arc in zip(range(numGals), all_delx, all_dely, all_lamt, all_pix_arc):
-            ims = np.array([images[i]])
-            plot.caustics(xgrid, ygrid, delx, dely, pix_arc, images=ims)
-            # plot.caustics(xgrid, ygrid, delx, dely, pix_arc, images=ims, zoom=5)
-    # print(images)
 
     # end
 # thank
+
+#> old code that might be useful later
+
+#> parallelization declarations
+# numCores = 48
+# gpuMemory = 64 # gb
+# print(tobytes(gpuMemory, 'g'))
+# numProcesses =  min(numCores, int( tobytes(gpuMemory, 'g') / ( numGals * 80000 * 57.5 ) ))
+# print(numProcesses)

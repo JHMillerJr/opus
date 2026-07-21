@@ -9,6 +9,7 @@
 #> standard imports
 import os
 import sys
+import glob
 import inspect
 import numpy as np
 
@@ -130,6 +131,75 @@ def fromNPYtoDF(fileName, observables=['t12', 't23', 't34', 'd2/d1', 'd3/d1' ,'d
     return df, data
 
 
+#> loading in npy files from parent dir
+def fromDIRtoDFs(dirPath, verbose=False, **kwargs):
+    
+    #> declarations
+    keywords = np.array(['images', 'obs', 'mags', 'srcs', 'lens', 'bprofiles'])
+    
+    #> unpacking kwargs
+    requested_keys = kwargs.get('keys', None)
+    if requested_keys is not None: 
+        requested_keys = np.array(requested_keys)
+        error_keys = requested_keys[[ x not in keywords for x in requested_keys ]]
+        if error_keys.size > 0: error.phrase(f'Could not find files with names containing {error_keys} in {dirPath}')
+    
+    #> formatting
+    if dirPath[-1] != '/': dirPath += '/'
+    
+    #> ensuring that folder exists
+    if not os.path.isdir(dirPath): error.phrase(f'{dirPath} does not exist')
+        
+    #> seeing what npy files exist in dir
+    files = glob.glob(dirPath + '*.npy')
+    if len(files) == 0: error.phrase(f'Could not find any .npy files in {dirPath}')
+    
+    #> looking for keywords
+    organized_files, misc_files = {}, []
+    for file in files:
+        
+        #> adjusting formatting
+        file = file.replace('\\', '/')
+        
+        #> finding key
+        key = keywords[[ x in file for x in keywords ]]
+        
+        #> organizing
+        if key.size == 0: misc_files.append(file) # saving if no key
+        else: organized_files[str(key[0])] = file # saving if key
+        
+    #> declaration (dictionary containing data products)
+    dfs = {}
+    
+    #> reducing to only requested if requested
+    if requested_keys is not None:
+        
+        #> iterating thru requested keys
+        for key in requested_keys:
+            dfs[key] = np.load(organized_files[key], allow_pickle=True)    
+        
+    else: # if not requesting, return all
+
+        #> iterating thru organized keys
+        for key in organized_files:
+            dfs[key] = np.load(organized_files[key], allow_pickle=True)    
+        
+        #> adding un-organized flies
+        for file in misc_files:
+            fileName = file.split('/')[-1][:-4] # getting raw fileName
+            dfs[fileName] = np.load(file, allow_pickle=True)    
+
+    #> if verbose
+    if verbose:
+        keys = [ str(x) for x in list(dfs.keys())]
+        print(f'> The keys for {dirPath} are {keys}')
+        
+    #> error checking
+    if len(dfs.keys()) == 0: error.phrase(f'Dataframe from {dirPath} contains no keys')
+    
+    return dfs
+
+
 """ #> WRITE FNS =====================
 ================================== """
 
@@ -167,9 +237,11 @@ if __name__ == '__main__':
     #> name
     print('> '+os.path.basename(__file__))
     
-    file = './data/2607081254.npy'
-    data, keys = fromNPY(file)
-    print(data['im_obs'][0])
+    dirPath = './data/+unsorted/2607171519'
+    fromDIRtoDFs(dirPath, verbose=True, keys=['images'])
+    
+    #data, keys = fromNPY(file)
+    #print(data['im_obs'][0])
     
     # end
 # thank

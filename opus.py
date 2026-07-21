@@ -63,20 +63,11 @@ if __name__ == '__main__':
     print('> '+os.path.basename(__file__))
     
     #> checking command line args 	
-
     if len(sys.argv) > 1: commandLine(sys.argv)
     
-    import plot
-    
     #> generating quad population from galaxy population
-    observables = ['t23', 'dt23', 'd4/d1', 't12', 't23', 't34']
+    # observables = ['t23', 'dt23', 'd4/d1', 't12', 't23', 't34']
     observables = ['t12', 't23', 't34', 'd4/d1', 'd3/d1', 'd2/d1', 'dt23']
-    # observables = ['t23', 'dt23', 'd4/d1']
-    srt = time.time()
-    # genQuadPop(numGals=1000, numQuads_gal=1, observables=observables, suffix='-speedtest')
-    # print(f'> The time for 1,000 quads is {time.time()-srt:.2e} s')
-    # 10, 10000
-    # 1000, 100
     
     fileName = dataDir+'2603021417-same'+'.npy'
     # plot3D(fileName, observables)
