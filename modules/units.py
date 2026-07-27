@@ -21,6 +21,7 @@ class u():
         self.c_km = 2.99792e+5         # km/s
         self.c_m = self.c_km * 1000    # m/s
         self.c_cm = self.c_m * 100     # cm/s
+        self.c_kpc = self.c_cm / self.cm_kpc # kpc/s
         
         #> physical units
         self.solMass = 1.989e+33 # g

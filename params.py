@@ -34,8 +34,8 @@ def paramRanges():
               'pix_arc': 60, # pix/arc conversion
               'nfw': [ # nfw
                      {'name': 'p01',
-                      'x0':            {'init':  0.0, 'min':-0.1, 'max':0.1, 'fit': True},   # x center of profile 
-                      'y0':            {'init':  0.0, 'min':-0.1, 'max':0.1, 'fit': True},   # y center of profile
+                      'x0':            {'init':  0.0, 'min':-0.1, 'max':0.1, 'fit': False},   # x center of profile 
+                      'y0':            {'init':  0.0, 'min':-0.1, 'max':0.1, 'fit': False},   # y center of profile
                       'logmass':       {'init':   13, 'min':  10, 'max': 14, 'fit': False},   # log_10(M) [solMass]
                       'concentration': {'init':    7, 'min':   2, 'max': 10, 'fit': False},   # concentration []
                       'axisrat':       {'init': 0.75, 'min': 0.5, 'max':0.95,'fit': False},    # axis ratio []
@@ -45,7 +45,7 @@ def paramRanges():
                       {'name': 'p02',
                        'x0':      {'init': 0.0, 'min':-0.1, 'max':0.1, 'fit': False},   # x center of profile 
                        'y0':      {'init': 0.0, 'min':-0.1, 'max':0.1, 'fit': False},   # y center of profile
-                       'logmass': {'init': 11.3, 'min':   8, 'max': 12, 'fit': False},   # log_10(M) [solMass]
+                       'logmass': {'init': 11.1, 'min':   8, 'max': 12, 'fit': False},   # log_10(M) [solMass]
                        'effrad':  {'init':    5, 'min': 0.5, 'max': 10, 'fit': False},   # R_E; effective radius [kpc]
                        'axisrat': {'init':'p01', 'min': 0.5, 'max':0.95,'fit': False},   # axis ratio []
                        'theta':   {'init':  0.0, 'min':-180, 'max':180, 'fit': False},   # position angle [deg]
@@ -236,6 +236,52 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True, cov=None, mu=None, ub
         batch_profiles.append(deepcopy(ranges))
     
     return batch_profiles
+
+
+""" #> PRIORS ========================
+================================== """
+
+#> halo mass function
+def halo_mass_fn():
+    
+    
+    
+    return
+
+
+#> mass-concentration relation
+#> taken from Table 3 of 2014 Dutton & Maccio
+# (c_vir or c_200?) and (Delta=200 or given by 2003 Mainini?)
+def mass_c_rel(M_vir, zl, h):
+    
+    #> declarations
+    M = (M_vir * h / (1e12))
+    
+    #> getting coeffs (for c_vir vs. M_vir)
+    a = 0.537 + ( (1.025-0.537) * np.exp(-0.718 * zl**(1.08)) )
+    b = -0.097 + 0.024*zl
+    
+    #> mass-concentration relation
+    log10_c_vir = a + ( b * np.log10(M) )
+    c_vir = 10**(log10_c_vir)
+    
+    return c_vir
+
+
+#> stellar-to-halo mass relation
+def stellar_h_mass_rel():
+    
+    
+    
+    return
+
+
+#> stellar mass-size relation
+def mass_r_relation():
+    
+    
+    
+    return
 
 
 """ #> GRID ==========================

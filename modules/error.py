@@ -78,8 +78,8 @@ def highlight(string):
     """
     string: error statement
     """
-    print(Fore.RED + Style.BRIGHT +  f'> {string}')
-    print(Style.RESET_ALL)
+    print(Fore.RED + Style.BRIGHT +  f'> {string}', Style.RESET_ALL)
+    # print(Style.RESET_ALL)
     return
     
 

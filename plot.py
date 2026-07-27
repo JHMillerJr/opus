@@ -393,7 +393,7 @@ def causticBox(x, y, gradx, grady, pix_arc, boxPoints,
     box = mpl.patches.Polygon(boxPoints, facecolor='none', 
                               edgecolor='b', linestyle='--',
                               linewidth=2)
-    ax.add_patch(box)
+    # ax.add_patch(box)
     
     #> plotting source
     if xs is not None: 

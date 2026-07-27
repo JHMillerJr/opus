@@ -134,15 +134,15 @@ def critDensity(z, cosmo=u.cosmo):
 def einRadius(logM, zd, zs, cosmo=u.cosmo):
 
     #> angular diameter distances
-    Dd  = angDist( 0, zd, cosmo)
-    Ds  = angDist( 0, zs, cosmo)
-    Dds = angDist(zd, zs, cosmo)
+    Dd  = angDist( 0, zd, cosmo) # Mpc
+    Ds  = angDist( 0, zs, cosmo) # Mpc
+    Dds = angDist(zd, zs, cosmo) # Mpc
     
     #> fractions
-    frac1 = (4 * u.G * u.cm_mpc * (10**logM) * u.solMass ) / u.c_cm**2 # Mpc
-    ER = ( (frac1 * Dds) / (Ds * Dd) * u.arc_rad )**0.5 # arcsecond
+    frac1 = ( (4 * u.G_kpc_solMass * (10**logM) ) / u.c_kpc**2 ) / 1e3 # Mpc
+    ER = ( (frac1 * Dds) / (Ds * Dd) )**0.5 * u.arc_rad # arcsecond
 
-    return ER
+    return ER # arcsec
         
 
 """ #> MAIN ==========================
@@ -154,6 +154,8 @@ if __name__ == '__main__':
     #> name
     import os
     print('> '+os.path.basename(__file__))
+    
+    
     
     # end
 # thank

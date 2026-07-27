@@ -64,23 +64,12 @@ def function():
     mags = False                               # if wanting image magnifications (will change saveFlag automatically)
     observables = ['t12', 't23', 't34', 'd2/d1', 'd3/d1' ,'d4/d1', 'dt23'] # requested lensing observables
     
-    #> paramRanges: can be edited to change param values, fit, etc.
-    if True:
-        
-        #> imports
+    #> bprofiles (i wouldn't recommend changing directly--code already does)
+    if False:
         import params
-        
-        #> getting paramRanges
-        paramRanges = params.toggleParams(galProfs) # the parameter ranges and values, can be edited
-        
-        #> place to edit values
-        #> structure: dict.keys() = ['nfw', 'hern', 'mult', 'ex'], np.array [0, ...], 
-        #>            dict.keys() = ['x0', ...], dict.keys() = ['init', 'min', 'max', 'fit']
-        
-        #> example
-        # paramRanges['nfw'][0]['x0']['fit'] = False
-
-    else: paramRanges = None
+        paramRanges = params.toggleParams(galProfs)
+        bprofiles = params.bprofiles(numGals, paramRanges, zl=zl, zs=zs, pix_arc=pix_arc, 
+                                     cov=cov, mu=mu, ub=ub, lb=lb, uniform=uniform, verbose=verbose)
         
     #> computatoin kwargs
     gpu = False                                # CURRENTLY NO GPU IMPLEMENTATION
@@ -98,7 +87,6 @@ def function():
                     pix_arc=pix_arc,              # pixel per arcsec conversion for grid
                     nph=nph,                      # width / 2 for grid
                     galProfs=galProfs,            # galaxy profiles
-                    paramRanges=paramRanges,      # the galaxy params, (see params)
                     lb=lb,                        # lower bounds for gal params
                     ub=ub,                        # upper bounds for gal params
                     mu=mu,                        # mu vector for gal params

@@ -24,7 +24,7 @@ def function():
     import generate
     
     #> declarations
-    numGals       = 10                         # total # of galaxies to generate
+    numGals       = 1                          # total # of galaxies to generate
     numSource_gal = 1                          # total # of sources per galaxy
     
     #> output kwargs
@@ -32,12 +32,12 @@ def function():
     suffix   = ''                              # suffix to add to file names
     verbose  = True                            # if wanting extra print info
     timeFlag = False                           # if wanting time info
-    saveFlag = generate.getSaveDict()          # what to save (images=im_obs=sources=bprofiles=True, im_mags=lens=False)
-    plotFlag = generate.getPlotDict(False)     # what to plot (kappa=caustics=True, deflect=caustics_zoom=False)
+    saveFlag = generate.getSaveDict(False)     # what to save (images=im_obs=sources=bprofiles=True, im_mags=lens=False)
+    plotFlag = generate.getPlotDict(True, kappa=False)     # what to plot (kappa=caustics=True, deflect=caustics_zoom=False)
     
     #> grid kwargs
     scale_factor = 1                           # increase (or decrease) grid resolution [default=1]
-    pix_arc      = 60                          # pixel per arcsec conversion [default=60]
+    pix_arc      = 86.46                         # pixel per arcsec conversion [default=60]
     nph          = 50                          # width / 2 of grid [default=50)
     
     #> galaxy profiles kwargs (what profiles to add)
@@ -55,14 +55,17 @@ def function():
     uniform = False                            # if sampling from uniform dist, i.e., (lb, ub), False=TruncNorm
     
     #> redshifts
-    zl = 0.5                                   # redshift of lens
+    zl = 0.7                                   # redshift of lens
     zs = 1.0                                   # redshift of source
+    # redshifts = (0.37374414, 1.18590195)
     redshifts = (zl, zs)                       # combined redshifts (for code)
+    # redshifts = generate.ranRedshifts(numGals)
+    print(redshifts)
     
     #> image properties kwargs
-    jims = 5                                   # number of request images from each source (5=quad)
+    jims = None                                   # number of request images from each source (5=quad)
     mags = False                               # if wanting image magnifications (will change saveFlag automatically)
-    observables = ['t12', 't23', 't34', 'd2/d1', 'd3/d1' ,'d4/d1', 'dt23'] # requested lensing observables
+    observables = None # ['t12', 't23', 't34', 'd2/d1', 'd3/d1' ,'d4/d1', 'dt23'] # requested lensing observables
     
     #> paramRanges: can be edited to change param values, fit, etc.
     if True:
@@ -72,14 +75,14 @@ def function():
         
         #> getting paramRanges
         paramRanges = params.toggleParams(galProfs) # the parameter ranges and values, can be edited
-        
+
         #> place to edit values
         #> structure: dict.keys() = ['nfw', 'hern', 'mult', 'ex'], np.array [0, ...], 
         #>            dict.keys() = ['x0', ...], dict.keys() = ['init', 'min', 'max', 'fit']
         
         #> example
-        # paramRanges['nfw'][0]['x0']['fit'] = False
-
+        paramRanges['nfw'][0]['logmass']['init'] = 13
+        
     else: paramRanges = None
         
     #> computatoin kwargs
@@ -98,7 +101,7 @@ def function():
                     pix_arc=pix_arc,              # pixel per arcsec conversion for grid
                     nph=nph,                      # width / 2 for grid
                     galProfs=galProfs,            # galaxy profiles
-                    paramRanges=paramRanges,      # the galaxy params, (see params)
+                    paramRanges=paramRanges,      # the galaxy params: ub, lb, fit or not, etc.
                     lb=lb,                        # lower bounds for gal params
                     ub=ub,                        # upper bounds for gal params
                     mu=mu,                        # mu vector for gal params
