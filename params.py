@@ -217,7 +217,7 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True, cov=None, mu=None, ub
             dic[param] = names[name][param] # names[dependant_name][dependant_param]
             
         #> calculating cosmological params (can save in batch_profiles)
-        ranges['rhoc'] =    cosmology.critDensity(ranges['zl'])              # solMass/kpc^3
+        ranges['rhoc']    = cosmology.critDensity(ranges['zl'])              # solMass/kpc^3
         ranges['sigCrit'] = cosmology.sigmaCrit(ranges['zl'], ranges['zs'])  # solMass/kpc^2
         ranges['angDist'] = cosmology.angDist(0, ranges['zl']) * 1e3         # kpc
         
