@@ -181,8 +181,8 @@ def deflection(X, Y, batch_profiles, gpu=False):
         s2 = cp.sin(dphi)
         
         #> calculating deflection angles + adding to total
-        gradx += norm*(Xr*c2 + Yr*s2)
-        grady += norm*(Yr*c2 - Xr*s2)
+        gradx += -norm*(Xr*c2 + Yr*s2)
+        grady += -norm*(Yr*c2 - Xr*s2)
         
     
     #> calculating kappa

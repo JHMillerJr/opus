@@ -29,8 +29,9 @@ def angDist(z1, z2, cosmo=u.cosmo):
     """
 
     #> dimensionless friedman eq; 2023 Birrer Eq. 12
-    E = lambda z: 1 / ( cosmo['omega_m']*(1 + z)**3 + 
-                        cosmo['omega_lam'] )**0.5
+    #! technically 1/E
+    E = lambda z: 1 / ( cosmo['omega_m_0']*(1 + z)**3 + 
+                        cosmo['omega_lam_0'] )**0.5
     
     #> comoving distance; 2023 Birrer Eq. 10 & 11
     X_1 = (u.c_km/cosmo['h0']) * sp.integrate.quad(E, 0, z1)[0]
@@ -55,8 +56,8 @@ def comovingDist(z1, z2, cosmo=u.cosmo):
     """
 
     #> dimensionless friedman eq; 2023 Birrer Eq. 12
-    E = lambda z: 1 / ( cosmo['omega_m']*(1 + z)**3 + 
-                        cosmo['omega_lam'] )**0.5
+    E = lambda z: 1 / ( cosmo['omega_m_0']*(1 + z)**3 + 
+                        cosmo['omega_lam_0'] )**0.5
     
     #> comoving distance; 2023 Birrer Eq. 10 & 11
     X_1 = (u.c_km/cosmo['h0']) * sp.integrate.quad(E, z1, z2)[0]
@@ -75,7 +76,7 @@ def hubble(z, cosmo=u.cosmo):
     """
 
     #> hubble constant at a given redshift (km/s/Mpc)
-    Hz = cosmo['h0'] * ( cosmo['omega_m']*(1 + z)**3 + cosmo['omega_lam'] )**0.5 # km/s/Mpc
+    Hz = cosmo['h0'] * ( cosmo['omega_m_0']*(1 + z)**3 + cosmo['omega_lam_0'] )**0.5 # km/s/Mpc
 
     return Hz / u.km_mpc # 1/s
 

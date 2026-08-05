@@ -32,9 +32,8 @@ class u():
         
         #> standard cosmology
         self.cosmo = {'h0': 70.000, 
-                     'omega_m': 0.27,
-                     'omega_lam': 0.73
-                     }
+                     'omega_m_0': 0.27}
+        self.cosmo['omega_lam_0'] = 1 - self.cosmo['omega_m_0']
         
         #> defaults for grid
         self.pix_arc = 60

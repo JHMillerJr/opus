@@ -102,52 +102,6 @@ def grid(**kwargs):
     return np.meshgrid(w_range, w_range)
 
 
-""" #> REDSHIFT ======================
-================================== """
-
-#> returns random redshifts
-def ranRedshifts(numGals, **kwargs):
-    
-    ### THESE SHOULD BE INFORMED FROM OBSERVATIONS/ THEORY
-    ### I CAN DO A FIRST PASS LOOK W/ EINSTEIN RADIUS...? 
-    ### OR LENSING PROBABILITY
-    
-    ### should be a joint probability distribution
-    
-    #> imports
-    from modules.truncated_mvn_sampler.minimax_tilting_sampler import TruncatedMVN    
-    
-    #> correlation matrix
-    cross_corl = 0.4
-    R = ( np.identity(n=2) * (1-cross_corl) ) + cross_corl
-    
-    #> deflector: lb, ub, mu, sigma
-    ub_zl    = kwargs.get('ub_zl', 1.5)
-    lb_zl    = kwargs.get('lb_zl', 0.1)
-    mu_zl    = kwargs.get('mu_zl', 0.5)
-    sigma_zl = kwargs.get('mu_zl', 0.1)
-    
-    #> source: lb, ub, mu, sigma
-    ub_zs    = kwargs.get('ub_zs', 3.0)
-    lb_zs    = kwargs.get('lb_zs', 0.5)
-    mu_zs    = kwargs.get('mu_zs', 1.0)
-    sigma_zs = kwargs.get('mu_zs', 0.1)
-    
-    #> constructing params
-    lb = np.array([lb_zl, lb_zs])
-    ub = np.array([ub_zl, ub_zs])
-    mu = np.array([mu_zl, mu_zs])
-    sigma = np.array([sigma_zl, sigma_zs])
-    cov = np.diag(sigma) @ R @ np.diag(sigma) # converting correlation & std vectors to covariance matrix
-    
-    #> drawing samples
-    tmvn = TruncatedMVN(mu, cov, lb, ub)
-    samples = tmvn.sample(numGals)
-    samples = np.array(samples)
-    
-    return samples.T
-
-
 """ #> GALPROFILES ===================
 ================================== """
 

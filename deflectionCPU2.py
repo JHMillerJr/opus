@@ -171,8 +171,8 @@ def deflection(X, Y, batch_profiles):
         s2 = np.sin(dphi)
         
         #> calculating deflection angles + adding to total
-        gradx += norm*(Xr*c2 + Yr*s2)
-        grady += norm*(Yr*c2 - Xr*s2)
+        gradx += -norm*(Xr*c2 + Yr*s2)
+        grady += -norm*(Yr*c2 - Xr*s2)
 
     #> calculating kappa
     gradxy, gradxx = np.gradient(gradx * pix_arc * arc_rad, axis=(1,2)) # grad^2 x

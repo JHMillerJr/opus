@@ -238,52 +238,6 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True, cov=None, mu=None, ub
     return batch_profiles
 
 
-""" #> PRIORS ========================
-================================== """
-
-#> halo mass function
-def halo_mass_fn():
-    
-    
-    
-    return
-
-
-#> mass-concentration relation
-#> taken from Table 3 of 2014 Dutton & Maccio
-# (c_vir or c_200?) and (Delta=200 or given by 2003 Mainini?)
-def mass_c_rel(M_vir, zl, h):
-    
-    #> declarations
-    M = (M_vir * h / (1e12))
-    
-    #> getting coeffs (for c_vir vs. M_vir)
-    a = 0.537 + ( (1.025-0.537) * np.exp(-0.718 * zl**(1.08)) )
-    b = -0.097 + 0.024*zl
-    
-    #> mass-concentration relation
-    log10_c_vir = a + ( b * np.log10(M) )
-    c_vir = 10**(log10_c_vir)
-    
-    return c_vir
-
-
-#> stellar-to-halo mass relation
-def stellar_h_mass_rel():
-    
-    
-    
-    return
-
-
-#> stellar mass-size relation
-def mass_r_relation():
-    
-    
-    
-    return
-
-
 """ #> GRID ==========================
 ================================== """
 

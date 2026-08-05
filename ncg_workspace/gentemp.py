@@ -37,14 +37,14 @@ def function():
     
     #> grid kwargs
     scale_factor = 1                           # increase (or decrease) grid resolution [default=1]
-    pix_arc      = 86.46                         # pixel per arcsec conversion [default=60]
+    pix_arc      = 60                          # pixel per arcsec conversion [default=60]
     nph          = 50                          # width / 2 of grid [default=50)
     
     #> galaxy profiles kwargs (what profiles to add)
     nfw  = True                                # adds a nfw profile [default=True]
     hern = True                                # adds a hernquist profile [default=True]
     mult = []                                  # adds multipole profiles corresponding to the numbers given [default=[]]
-    ex   = False                               # adds external shear [default=False]
+    ex   = True                               # adds external shear [default=False]
     galProfs = generate.galProfiles(nfw=nfw, hern=hern, mult=mult, ex=ex) # dictionary handled by the code
     
     #> galaxy profile params kwargs (values of said profiles)
@@ -55,7 +55,7 @@ def function():
     uniform = False                            # if sampling from uniform dist, i.e., (lb, ub), False=TruncNorm
     
     #> redshifts
-    zl = 0.7                                   # redshift of lens
+    zl = 0.5                                   # redshift of lens
     zs = 1.0                                   # redshift of source
     # redshifts = (0.37374414, 1.18590195)
     redshifts = (zl, zs)                       # combined redshifts (for code)
@@ -80,8 +80,9 @@ def function():
         #> structure: dict.keys() = ['nfw', 'hern', 'mult', 'ex'], np.array [0, ...], 
         #>            dict.keys() = ['x0', ...], dict.keys() = ['init', 'min', 'max', 'fit']
         
-        #> example
-        paramRanges['nfw'][0]['logmass']['init'] = 13
+        #> examples
+        paramRanges['ex'][0]['norm']['init'] = 0.05
+        paramRanges['ex'][0]['theta']['init'] = 0
         
     else: paramRanges = None
         
