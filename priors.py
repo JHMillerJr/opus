@@ -7,12 +7,19 @@
 
 #> standard imports
 import numpy as np
-import scipy as sp
+from scipy.stats import norm
+from scipy.optimize import brentq
+from scipy.integrate import cumulative_trapezoid
 
 #> modules
 import cosmology
 from modules.units import u; u=u()
 import modules.error as error
+from modules.truncated_mvn_sampler.minimax_tilting_sampler import TruncatedMVN   
+
+#> colossus
+from colossus.lss import mass_function
+from colossus.cosmology import cosmology as ccos
 
 
 """ #> MAIN PRIOR FN =================
@@ -53,10 +60,7 @@ def ranRedshifts(numGals, **kwargs):
     ### I CAN DO A FIRST PASS LOOK W/ EINSTEIN RADIUS...? 
     ### OR LENSING PROBABILITY
     
-    ### should be a joint probability distribution
-    
-    #> imports
-    from modules.truncated_mvn_sampler.minimax_tilting_sampler import TruncatedMVN    
+    ### should be a joint probability distribution 
     
     #> correlation matrix
     cross_corl = 0.4
@@ -129,9 +133,6 @@ def densityContrast(z, cosmo=u.cosmo):
 #> colossus halo mass function
 def halo_mass_fn(zlens, cosmo=u.cosmo, **kwargs):
     
-    #> imports
-    from colossus.cosmology import cosmology as ccos
-    
     #> declarations
     ccosmo = ccos.setCosmology('myCosmo', 
                                params=ccos.cosmologies['planck18'], # initial base cosmology (keeps Ob0, sigma8, and ns)
@@ -173,10 +174,6 @@ def halo_mass_fn(zlens, cosmo=u.cosmo, **kwargs):
 
 #> obtaining colossus mass function and cdf
 def halo_cdf(zlens, h, log10Mmin=11.5, log10Mmax=14.5, mdef='vir', ngrid=4096):
-    
-    #> imports
-    from scipy.integrate import cumulative_trapezoid
-    from colossus.lss import mass_function
     
     #> logarithmic mass grid
     lnMmin = np.log(h * 10**log10Mmin)       # changing to solM/h and base e
@@ -258,11 +255,32 @@ def mass_c_200_rel(M_200, zl, h):
 ================================== """
 
 #> stellar-to-halo mass relation
-def stellar_h_mass_rel():
+def stellar_h_mass_rel(M_vir, zl):
     
+    #### M/h?????
     
+    #> declarations
+    logM_1, logM_star_0, beta, delta, gamma = 0, 0, 0, 0, 0
     
-    return
+    #> target halo mass
+    logM_vir = np.log10(M_vir)
+
+    #> equation 9 residual
+    def residual(logM_star):
+        
+        ratio = 10**(logM_star - logM_star_0)
+
+        logM_vir_model = (logM_1
+                       + beta*np.log10(ratio)
+                       + ratio**delta/(1 + ratio**(-gamma))
+                       - 0.5)
+        
+        return logM_vir_model - logM_vir
+
+    #> numerically inverting equation 9
+    logM_star = brentq(residual, 6, 13)
+    
+    return 10**logM_star
 
 
 """ #> STELLAR-M-S REL ===============
