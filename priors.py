@@ -364,7 +364,7 @@ def stellar_h_mass_rel(M_virs, zls, **kwargs):
 """ #> STELLAR-M-S REL ===============
 ================================== """
 
-#> stellar mass-size relation
+#> stellar mass-size relation (half-light radius)
 #> taken from 2025 Cook; Table 4 spheroid-dominated, Eq. 2
 def mass_r_relation(M_stars, zls, morph='spheroid', **kwargs):
     
@@ -402,7 +402,7 @@ def mass_r_relation(M_stars, zls, morph='spheroid', **kwargs):
     return r_eff
 
 
-#> stellar mass-size relation
+#> stellar mass-size relation (half-light radius)
 #> taken from Eq. 3, Table 1 of 2014 Van der Wel
 def mass_r_relation_14wel(M_stars, zls):
     
@@ -437,7 +437,7 @@ def mass_r_relation_14wel(M_stars, zls):
     return r_eff
 
 
-#> stellar mass-size relation
+#> stellar mass-size relation (half-light radius)
 #> taken from Eq. 4, Table 2 of 2018 Mowla
 def mass_r_relation_18mowla(M_stars, zls):
     
@@ -463,6 +463,18 @@ def mass_r_relation_18mowla(M_stars, zls):
     
     return r_eff
 
+
+#> stellar mass-size relation (half-mass radius)
+#> taken from Eq. 1, Table 3 of 2026 Xin
+def mass_r_relation_26xin(M_stars, zls):
+    
+    #> iterating thru each lens
+    r_eff = np.zeros(len(zls))
+    for i, (M_star, zl) in enumerate(zip(M_stars, zls)):
+        
+        pass
+        
+    return r_eff
 
 
 """ #> MAIN ==========================
