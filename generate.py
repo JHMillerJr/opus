@@ -153,7 +153,7 @@ def singleGal(sysConfig, **kwargs):
 
 
 #> generates single galaxy
-def genGal(redshifts, galProfiles, **kwargs):
+def genGal(redshifts, galProfiles=galProfiles(), **kwargs):
     
     #> unpacking
     zl, zs = redshifts
@@ -287,6 +287,10 @@ def genPop(numGals, **kwargs):
     
     ##### ONE MORE KWARGS = SOURCE
     
+    #> imports
+    import priors
+    import params
+    
     #> declarations
     numGals = int(numGals)                          # number of galaxies to generate
     numSource_gal = kwargs.get('numSource_gal', 1)  # number of sources per galaxy
@@ -312,15 +316,16 @@ def genPop(numGals, **kwargs):
     hern = kwargs.get('hern', True)               # if want hernquist profile
     mult = kwargs.get('mult', [])                 # multipoles requested to be in the galaxies
     ex   = kwargs.get('ex', False)                # if want external shear
-    galProfs = kwargs.get('galProfs', galProfiles(nfw=nfw, hern=hern, mult=mult, ex=ex)) # default galaxy profiles
+    galProfs = kwargs.get('galProfs', galProfiles (nfw=nfw, hern=hern, mult=mult, ex=ex)) # default galaxy profiles
     paramRanges = kwargs.get('paramRanges', None) # the paramRanges from params, list of all parmas for each profile
-    redshifts = kwargs.get('redshifts', ranRedshifts(numGals))                  # randomized default redshifts (might result in NCGs)
+    redshifts = kwargs.get('redshifts', priors.ranRedshifts(numGals))                  # randomized default redshifts (might result in NCGs)
     if isinstance(redshifts, tuple): redshifts = np.array([redshifts] * numGals)# converting redshifts if tuple, i.e., supplied as (zl, zs)
     uniform = kwargs.get('uniform', False)        # sampling galaxy params uniformly instead of Gaussian
     lb  = kwargs.get('lb', None)                  # lower bounds for galaxy params (i.e., bprofiles)
     ub  = kwargs.get('ub', None)                  # upper bounds for galaxy params
     mu  = kwargs.get('mu', None)                  # mu vector for galaxy params
     cov = kwargs.get('cov', None)                 # covariance matrix for galaxy params]
+    priorDict = kwargs.get('priorDict', params.getPriorDict()) # priors
     
     #> image properties kwargs
     jims = kwargs.get('jims', None)               # number of images wanted from lens
@@ -371,7 +376,7 @@ def genPop(numGals, **kwargs):
     #> generating galaxies (this should cover all possible arguments)
     srt = time.time()
     lenses, bprofiles = genGalPop(redshifts,               # (zl, zs) redshifts      [Nx2 np.array]
-                                  galProfs,                # profiles to be included [dic]
+                                  galProfiles=galProfs,    # profiles to be included [dic]
                                   paramRanges=paramRanges, # pre-con paramRanges     [dic]
                                   nph=nph,                 # width / 2 for grid      [int]
                                   pix_arc=pix_arc,         # pixel / arcsec convers. [list]
@@ -380,6 +385,7 @@ def genPop(numGals, **kwargs):
                                   ub=ub,                   # upper bounds vector     [None or Nx1 np.array]
                                   mu=mu,                   # mu vector               [None or Nx1 np.array]
                                   cov=cov,                 # covariance matrix       [None or NxN np.array]
+                                  priorDict=priorDict,     # prior dictionary        [dic]
                                   gpu=gpu,                 # if using GPU            [bool]
                                   verbose=verbose)         # if want print info      [bool]
     if timeFlag: print(f'> Generating galaxies took {time.time()-srt:.2f} s')
@@ -485,7 +491,7 @@ def genPop(numGals, **kwargs):
 
 
 #> generates a population of galaxies
-def genGalPop(redshifts, galProfiles, **kwargs):
+def genGalPop(redshifts, **kwargs):
     
     #> imports
     import params
@@ -506,9 +512,10 @@ def genGalPop(redshifts, galProfiles, **kwargs):
     if bprofiles is None:
         
         #> getting precon paramRanges if given
+        galProfiles_ = kwargs.get('galProfiles', galProfiles())
         paramRanges = kwargs.get('paramRanges', None)
         if paramRanges is None: 
-            paramRanges = params.toggleParams(galProfiles)
+            paramRanges = params.toggleParams(galProfiles_)
         
         #> creating bprofiles
         bprofiles = params.bprofiles(numGals, paramRanges, 
@@ -518,7 +525,8 @@ def genGalPop(redshifts, galProfiles, **kwargs):
                                      mu=kwargs.get('mu', None),
                                      ub=kwargs.get('ub', None),
                                      lb=kwargs.get('lb', None),
-                                     uniform=kwargs.get('uniform', False))
+                                     uniform=kwargs.get('uniform', False),
+                                     priorDict=kwargs.get('priorDict', params.getPriorDict()))
         
     #> grid declarations
     nph = kwargs.get('nph', u.nph)

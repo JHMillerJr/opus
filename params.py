@@ -22,7 +22,7 @@ from modules.units import u; u = u()
 from modules.truncated_mvn_sampler.minimax_tilting_sampler import TruncatedMVN    
 
 
-""" #> PARAMS ========================
+""" #> PARAM RANGES ==================
 ================================== """
 
 #> returns the profile input parameters
@@ -79,7 +79,6 @@ def paramRanges():
     }
     
     return ranges
-    
 
 #> prunes the non-varied params
 def pruneParams(ranges=paramRanges()):
@@ -134,8 +133,45 @@ def toggleParams(paramDict, ranges=None):
     return ranges
     
 
+""" #> BPROFILES =====================
+================================== """
+
+#> returns prior dictionary (if drawing from priors)
+def getPriorDict(hmf=False, cmr=False, shmr=False, msr=False, **kwargs):
+    
+    #> kwargs
+    all_ = kwargs.get('all', None)
+    
+    #> default if drawing from priors
+    priorDict = {'hmf' :  hmf, 'cmr': cmr,
+                 'shmr': shmr, 'msr': msr}
+    
+    #> setting all
+    if all_ is not None:
+        for key in priorDict:
+            priorDict[key] = all_
+    
+    return priorDict
+
+
 #> returns batch profiles for deflections based on parameter ranges
-def bprofiles(numgals, ranges=paramRanges(), verbose=True, cov=None, mu=None, ub=None, lb=None, **kwargs):
+def bprofiles(numgals, ranges=paramRanges(), verbose=True, 
+              cov=None, mu=None, ub=None, lb=None, 
+              priorDict=getPriorDict(), **kwargs):
+    
+    #> changing varied params based on priors
+    priorLocs = {'hmf' : {'prof':  'nfw', 'param':       'logmass', 'sample':  'log10_M_vir'},
+                 'cmr' : {'prof':  'nfw', 'param': 'concentration', 'sample':        'c_vir'},
+                 'shmr': {'prof': 'hern', 'param':       'logmass', 'sample': 'log10_M_star'},
+                 'msr' : {'prof': 'hern', 'param':        'effrad', 'sample':        'R_eff'}}
+    
+    #> iterating thru priors
+    if any(priorDict.values()):      # if there is at least one prior
+        for key in priorDict.keys(): # iterating thru each prior
+            if not priorDict[key]: continue # if not used, continue
+            for prof in ranges[priorLocs[key]['prof']]:
+                prof[priorLocs[key]['param']]['fit'] = False
+                prof[priorLocs[key]['param']]['init'] = 0.0
     
     #> pruning non-varied params
     ranges, varied_params, depend_params, names = pruneParams(ranges)
@@ -145,13 +181,14 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True, cov=None, mu=None, ub
     zs = kwargs.get('zs', ranges['zs'])
     pix_arc = kwargs.get('pix_arc', ranges['pix_arc'])
     uniform = kwargs.get('uniform', False)
+    cosmo = kwargs.get('cosmo', u.cosmo)
     
     #> number of varied parameters
     d = len(varied_params) # num dims
     
-    #> print the varied params
+    #> print the varied paramsW
     if True:
-        print(f'> The varied params are:')
+        print('> The varied params are:')
         for var in varied_params:
             print(f'>   {var[0]}, {var[1]}, {var[2]}')
         print()
@@ -195,6 +232,13 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True, cov=None, mu=None, ub
             samples = np.random.uniform(low=lb, high=ub, size=(numgals, d)).T
             
             
+    #> drawing from priors
+    if any(priorDict.values()):
+        import priors # importing priors
+        # REDSHIFTS ARE CURRENTLY BEING PASSED TO BPROFILES, NOT FROM PRIORS
+        # WILL LIKELY HAVE TO REDO?? IDK
+        df = priors.sample_priors(priorDict, numgals, cosmo=cosmo, zls=zl)
+            
     #> creating batch profiles!
     batch_profiles = [] # each element is a galaxy
     for i in range(numgals):
@@ -209,6 +253,14 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True, cov=None, mu=None, ub
             prof, ind, param, _ = p
             ranges[prof][ind][param] = samples[j][i]
             
+        #> iterating thru priors
+        if any(priorDict.values()):      # if there is at least one prior
+            for key in priorDict.keys(): # iterating thru each prior
+                if not priorDict[key]: continue # if not used, continue
+                for prof in ranges[priorLocs[key]['prof']]:
+                    prof[priorLocs[key]['param']] = df.loc[i][priorLocs[key]['sample']]
+        
+        print(ranges, df.loc[i])
         #> unit conversions
             
         #> setting depend params
@@ -217,9 +269,9 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True, cov=None, mu=None, ub
             dic[param] = names[name][param] # names[dependant_name][dependant_param]
             
         #> calculating cosmological params (can save in batch_profiles)
-        ranges['rhoc']    = cosmology.critDensity(ranges['zl'])              # solMass/kpc^3
-        ranges['sigCrit'] = cosmology.sigmaCrit(ranges['zl'], ranges['zs'])  # solMass/kpc^2
-        ranges['angDist'] = cosmology.angDist(0, ranges['zl']) * 1e3         # kpc
+        ranges['rhoc']    = cosmology.critDensity(ranges['zl'], cosmo=cosmo)              # solMass/kpc^3
+        ranges['sigCrit'] = cosmology.sigmaCrit(ranges['zl'], ranges['zs'], cosmo=cosmo)  # solMass/kpc^2
+        ranges['angDist'] = cosmology.angDist(0, ranges['zl'], cosmo=cosmo) * 1e3         # kpc
         
         #> adding calculated params
         #> nfw: logmass, rhoc(z), c --> radius; rhoc(z), c --> rho0

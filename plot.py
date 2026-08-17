@@ -11,6 +11,7 @@ import numpy as np
 #> plotting
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 
 #> classes
 import lensing
@@ -30,6 +31,10 @@ fig_loc = 'figures/'
 #> saving parameters
 dpi = 600
 imSize = 80
+
+#> labels
+fontsize = 15
+labelpad = 10
 
 #> time order labels
 orderLabels = True
@@ -471,6 +476,141 @@ def plotPop(fileName, observables):
             ax.scatter(images[:,1], images[:,2], alpha=alpha, c='m', s=size)
             ax.set_xlabel(observables[1], fontsize=fontsize, fontweight='bold')
             ax.set_ylabel(observables[2], fontsize=fontsize, fontweight='bold')
+    
+    return
+
+
+""" #> PRIORS ========================
+================================== """
+
+
+#> plots the distribution of priors
+def priors_z(df, **kwargs):
+    
+    #> declarations
+    keys = df.keys()[1:] # removing redshift
+    suptitle = kwargs.get('suptitle', None)
+    
+    #> initializing plot
+    fig, axes = plt.subplots(2, 2, figsize=(13, 12))
+    if suptitle is not None: 
+        plt.suptitle(suptitle, fontsize=fontsize, fontweight='bold', y=0.94)
+    
+    for i, ax in enumerate(axes.flat):
+        
+        ax.grid(ls=':', alpha=0.5)
+        ax.set_ylabel(r'$\mathbf{log_{10}}$'+f'{keys[i]}', fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+        ax.set_xlabel(r'$\mathbf{z_l}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+        
+        #> plotting
+        ax.plot(df['zl'], np.log10(df[keys[i]]))
+        
+    plt.show()
+    
+    #> saving and closing
+    outFile = kwargs.get('outFile', None)
+    if outFile is not None: 
+        plt.savefig(fig_loc + outFile + '.png', dpi=dpi, bbox_inches='tight')
+    
+    return
+
+
+#> plots prior correlations
+def priors_correl(df, **kwargs):
+    
+    #> declarations
+    keys = df.keys()[1:] # removing redshift
+    suptitle = kwargs.get('suptitle', None)
+    
+    #> initializing plot
+    fig, axes = plt.subplots(2, 2, figsize=(12, 12))
+    if suptitle is not None: 
+        plt.suptitle(suptitle, fontsize=fontsize, fontweight='bold', y=0.94)
+    
+    for i, ax in enumerate(axes.flat):
+        
+        ax.grid(ls=':', alpha=0.5)
+        ax.set_ylabel(keys[i],fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+        ax.set_xlabel(r'$\mathbf{z_l}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+        
+        #> halo mass function
+        if i == 0:
+            
+            ax.xaxis.set_major_locator(ticker.MultipleLocator(0.2))
+            ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
+            ax.scatter(df['zl'], np.log10(df['M_vir']))
+            ax.set_ylabel(r'$\mathbf{log_{10}M_{vir}}$', fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+            ax.set_xlabel(r'$\mathbf{z_l}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+            
+            
+        #> halo mass-concentration relation
+        if i == 1:
+            
+            ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
+            ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
+            ax.scatter(np.log10(df['M_vir']), df['c_vir'])
+            ax.set_ylabel(r'$\mathbf{log_{10}c_{vir}}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+            ax.set_xlabel(r'$\mathbf{log_{10}M_{vir}}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+            
+            
+        #> stellar-to-halo mass relation
+        if i == 2:
+            
+            ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
+            ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
+            
+            #> plotting
+            ax.scatter(np.log10(df['M_vir']), np.log10(df['M_star']))
+            ax.set_ylabel(r'$\mathbf{log_{10}M_{star}}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+            ax.set_xlabel(r'$\mathbf{log_{10}M_{vir}}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+            
+            #> saving min and max
+            xlims = ax.get_xlim()
+            ylims = ax.get_ylim()
+            
+            #> adding guiding lines
+            x = np.linspace(xlims[0], xlims[1], 1000)
+            ax.plot(x, x, c='k', label='+0 dex')
+            ax.plot(x, x-1, c='k', ls='--', label='-1 dex')
+            ax.plot(x, x-2, c='k', ls=':', label='-2 dex')
+            
+            #> resetting limits
+            ax.set_xlim(*xlims)
+            ax.set_ylim(*ylims)
+            
+            ax.legend()
+            
+        #> stellar mass-size relation
+        if i == 3:
+            
+            #> ticks
+            ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
+            ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
+            
+            #> plotting!
+            ax.scatter(np.log10(df['M_star']), np.log10(df['R_eff']))
+            ax.set_ylabel(r'$\mathbf{log_{10}R_{eff}}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+            ax.set_xlabel(r'$\mathbf{log_{10}M_{star}}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+            
+            #> saving min and max
+            xlims = ax.get_xlim()
+            ylims = ax.get_ylim()
+            
+            print(xlims)
+            
+            #> 2010 Auger SLACs lenses
+            x = np.linspace(xlims[0], xlims[1], 1000)
+            a = 0.81
+            b = 0.53
+            ax.plot(x, (a*(x-11) + b), c='k', label='2010 Auger')
+            ax.legend()
+    
+    #> saving and closing
+    outFile = kwargs.get('outFile', None)
+    if outFile is not None: 
+        plt.savefig(fig_loc + outFile + '.png', dpi=dpi, bbox_inches='tight')
+    
+    plt.show()
     
     return
     

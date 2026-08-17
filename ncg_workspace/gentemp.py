@@ -22,9 +22,10 @@ def function():
     
     #> imports  (CHANGE IF GENERATE IS IN DIFF DIR)
     import generate
+    import params
     
     #> declarations
-    numGals       = 1                          # total # of galaxies to generate
+    numGals       = 100                        # total # of galaxies to generate
     numSource_gal = 1                          # total # of sources per galaxy
     
     #> output kwargs
@@ -44,7 +45,7 @@ def function():
     nfw  = True                                # adds a nfw profile [default=True]
     hern = True                                # adds a hernquist profile [default=True]
     mult = []                                  # adds multipole profiles corresponding to the numbers given [default=[]]
-    ex   = True                               # adds external shear [default=False]
+    ex   = False                               # adds external shear [default=False]
     galProfs = generate.galProfiles(nfw=nfw, hern=hern, mult=mult, ex=ex) # dictionary handled by the code
     
     #> galaxy profile params kwargs (values of said profiles)
@@ -53,6 +54,13 @@ def function():
     mu  = None                                 # mean vector         ... [example=[1, 1]]
     cov = None                                 # covariance matrix   ... [example=np.identity(n=2)]
     uniform = False                            # if sampling from uniform dist, i.e., (lb, ub), False=TruncNorm
+    
+    #> priors
+    hmf  = True                                # halo mass function
+    cmr  = True                                # concentration-mass relation
+    shmr = True                                # stellar-to-halo mass relation
+    msr  = True                                # stellar mass-size relation
+    priorDict = params.getPriorDict(hmf=hmf, cmr=cmr, shmr=shmr, msr=msr) # if wanting to draw from priors (hmf, cmr, shmr, msr)
     
     #> redshifts
     zl = 0.5                                   # redshift of lens
@@ -63,7 +71,7 @@ def function():
     print(redshifts)
     
     #> image properties kwargs
-    jims = None                                   # number of request images from each source (5=quad)
+    jims = None                                # number of request images from each source (5=quad)
     mags = False                               # if wanting image magnifications (will change saveFlag automatically)
     observables = None # ['t12', 't23', 't34', 'd2/d1', 'd3/d1' ,'d4/d1', 'dt23'] # requested lensing observables
     
@@ -71,23 +79,22 @@ def function():
     if True:
         
         #> imports
-        import params
+        import priors
         
         #> getting paramRanges
         paramRanges = params.toggleParams(galProfs) # the parameter ranges and values, can be edited
-
+        
         #> place to edit values
         #> structure: dict.keys() = ['nfw', 'hern', 'mult', 'ex'], np.array [0, ...], 
         #>            dict.keys() = ['x0', ...], dict.keys() = ['init', 'min', 'max', 'fit']
         
         #> examples
-        paramRanges['ex'][0]['norm']['init'] = 0.05
-        paramRanges['ex'][0]['theta']['init'] = 0
+        
         
     else: paramRanges = None
         
     #> computatoin kwargs
-    gpu = False                                # CURRENTLY NO GPU IMPLEMENTATION
+    gpu = False                                   # CURRENTLY NO GPU IMPLEMENTATION
     
     #> generating!
     generate.genPop(numGals,                      # # galaxies
@@ -108,6 +115,7 @@ def function():
                     mu=mu,                        # mu vector for gal params
                     cov=cov,                      # covariance matrix for gal params
                     uniform=uniform,              # if want to sample uniformly
+                    priorDict=priorDict,          # if wanting to draw from priors
                     redshifts=redshifts,          # redshifts (or distribution of)
                     jims=jims,                    # requested number of images per source
                     mags=mags,                    # if want image mags
