@@ -1,0 +1,28 @@
+/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:3860: RuntimeWarning: Mean of empty slice.
+  return _methods._mean(a, axis=axis, dtype=dtype,
+/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/numpy/_core/_methods.py:147: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret / rcount
+> gentemp.py 
+
+{'images': False, 'im_obs': False, 'im_mags': False, 'sources': False, 'lens': False, 'bprofiles': False}
+(0.5, 1.0)
+0.05475
+0.14425
+0.23375
+0.32325
+0.41275
+0.50225
+0.59175
+0.68125
+0.77075
+0.86025
+0.94975
+1.03925
+1.12875
+1.21825
+1.30775
+1.39725
+1.48675
+1.57625
+1.66575
+1.75525

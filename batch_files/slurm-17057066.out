@@ -1,0 +1,45 @@
+> gentemp_p.py 
+
+{'images': False, 'im_obs': False, 'im_mags': False, 'sources': False, 'lens': False, 'bprofiles': False}
+(0.5, 1.0)
+> zs workers: 20
+> zl = 0.0548
+> saved ../priors/look_up_tables/model_zl_0.05.parquet
+> zl = 0.1442
+> saved ../priors/look_up_tables/model_zl_0.14.parquet
+> zl = 0.2338
+> saved ../priors/look_up_tables/model_zl_0.23.parquet
+> zl = 0.3232
+> saved ../priors/look_up_tables/model_zl_0.32.parquet
+> zl = 0.4128
+> saved ../priors/look_up_tables/model_zl_0.41.parquet
+> zl = 0.5022
+> saved ../priors/look_up_tables/model_zl_0.50.parquet
+> zl = 0.5917
+> saved ../priors/look_up_tables/model_zl_0.59.parquet
+> zl = 0.6813
+> saved ../priors/look_up_tables/model_zl_0.68.parquet
+> zl = 0.7708
+> saved ../priors/look_up_tables/model_zl_0.77.parquet
+> zl = 0.8602
+> saved ../priors/look_up_tables/model_zl_0.86.parquet
+> zl = 0.9497
+> saved ../priors/look_up_tables/model_zl_0.95.parquet
+> zl = 1.0393
+> saved ../priors/look_up_tables/model_zl_1.04.parquet
+> zl = 1.1287
+> saved ../priors/look_up_tables/model_zl_1.13.parquet
+> zl = 1.2183
+> saved ../priors/look_up_tables/model_zl_1.22.parquet
+> zl = 1.3077
+> saved ../priors/look_up_tables/model_zl_1.31.parquet
+> zl = 1.3973
+> saved ../priors/look_up_tables/model_zl_1.40.parquet
+> zl = 1.4868
+> saved ../priors/look_up_tables/model_zl_1.49.parquet
+> zl = 1.5762
+> saved ../priors/look_up_tables/model_zl_1.58.parquet
+> zl = 1.6658
+> saved ../priors/look_up_tables/model_zl_1.67.parquet
+> zl = 1.7552
+> saved ../priors/look_up_tables/model_zl_1.76.parquet

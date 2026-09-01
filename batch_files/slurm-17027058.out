@@ -1,0 +1,2 @@
+/var/spool/slurmd/job17027058/slurm_script: line 11: 939044 Killed                  python ../ncg_workspace/gentemp.py
+[2026-08-26T00:33:33.277] error: Detected 1 oom_kill event in StepId=17027058.batch. Some of the step tasks have been OOM Killed.

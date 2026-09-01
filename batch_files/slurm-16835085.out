@@ -1,0 +1,30 @@
+/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:3860: RuntimeWarning: Mean of empty slice.
+  return _methods._mean(a, axis=axis, dtype=dtype,
+/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/numpy/_core/_methods.py:147: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret / rcount
+> gentemp.py 
+
+{'images': False, 'im_obs': False, 'im_mags': False, 'sources': False, 'lens': False, 'bprofiles': False}
+(0.5, 1.0)
+0.05475
+Traceback (most recent call last):
+  File "/users/9/mill9614/opus/./ncg_workspace/gentemp.py", line 306, in <module>
+    function()
+  File "/users/9/mill9614/opus/./ncg_workspace/gentemp.py", line 259, in function
+    df.to_parquet(outFile)
+  File "/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/pandas/util/_decorators.py", line 333, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/pandas/core/frame.py", line 3113, in to_parquet
+    return to_parquet(
+           ^^^^^^^^^^^
+  File "/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/pandas/io/parquet.py", line 476, in to_parquet
+    impl = get_engine(engine)
+           ^^^^^^^^^^^^^^^^^^
+  File "/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/pandas/io/parquet.py", line 67, in get_engine
+    raise ImportError(
+ImportError: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.
+A suitable version of pyarrow or fastparquet is required for parquet support.
+Trying to import the above resulted in these errors:
+ - Missing optional dependency 'pyarrow'. pyarrow is required for parquet support. Use pip or conda to install pyarrow.
+ - Missing optional dependency 'fastparquet'. fastparquet is required for parquet support. Use pip or conda to install fastparquet.

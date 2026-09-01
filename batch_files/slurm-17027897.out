@@ -1,0 +1,27 @@
+/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:3860: RuntimeWarning: Mean of empty slice.
+  return _methods._mean(a, axis=axis, dtype=dtype,
+/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/numpy/_core/_methods.py:147: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret / rcount
+> gentemp.py 
+
+{'images': False, 'im_obs': False, 'im_mags': False, 'sources': False, 'lens': False, 'bprofiles': False}
+(0.5, 1.0)
+0.05475
+Traceback (most recent call last):
+  File "/users/9/mill9614/opus/batch_files/../ncg_workspace/gentemp.py", line 315, in <module>
+    function()
+  File "/users/9/mill9614/opus/batch_files/../ncg_workspace/gentemp.py", line 266, in function
+    df.to_parquet(outFile)
+  File "/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/pandas/core/frame.py", line 3135, in to_parquet
+    return to_parquet(
+           ^^^^^^^^^^^
+  File "/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/pandas/io/parquet.py", line 490, in to_parquet
+    impl.write(
+  File "/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/pandas/io/parquet.py", line 342, in write
+    self.api.write(
+  File "/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/fastparquet/writer.py", line 1340, in write
+    write_simple(filename, data, fmd,
+  File "/users/9/mill9614/.conda/envs/millcpu/lib/python3.12/site-packages/fastparquet/writer.py", line 999, in write_simple
+    of = open_with(fn, mode)
+         ^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: './priors/look_up_tables/model_zl_0.05.parquet'

@@ -346,6 +346,8 @@ def caustics(x, y, gradx, grady, pix_arc,
     
     #> plotting images
     if images is not None:
+        if len(images.shape) != 3:
+            images = np.array([images])
         plotImages(ax, images)
 
         

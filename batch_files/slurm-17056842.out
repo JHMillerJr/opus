@@ -1,0 +1,9 @@
+> gentemp_p.py 
+
+{'images': False, 'im_obs': False, 'im_mags': False, 'sources': False, 'lens': False, 'bprofiles': False}
+(0.5, 1.0)
+> zs workers: 2
+> zl = 0.4575
+> saved ../priors/look_up_tables/model_zl_0.46.parquet
+> zl = 1.3525
+> saved ../priors/look_up_tables/model_zl_1.35.parquet

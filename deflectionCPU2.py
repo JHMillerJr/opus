@@ -36,9 +36,7 @@ def deflection(X, Y, batch_profiles):
     gradx = np.zeros((B, Ny, Nx), dtype=np.float32)
     grady = np.zeros((B, Ny, Nx), dtype=np.float32)
 
-    # -------------------------
-    # extract common arrays once
-    # -------------------------
+    #> arrays
     angDist = np.array([p['angDist'] for p in batch_profiles], dtype=np.float32)
     sigCrit = np.array([p['sigCrit'] for p in batch_profiles], dtype=np.float32)
     pix_arc = np.array([p['pix_arc'] for p in batch_profiles], dtype=np.float32)

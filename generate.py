@@ -9,6 +9,7 @@
 import os
 import sys
 import time
+import random
 import numpy as np
 from datetime import datetime
 
@@ -184,7 +185,7 @@ def genGal(redshifts, galProfiles=galProfiles(), **kwargs):
 
 
 #> generates single quad
-def genQuad(lens, zs, **kwargs):
+def genQuad(lens, **kwargs):
     
     #> declarations
     global maxTries
@@ -326,8 +327,10 @@ def genPop(numGals, **kwargs):
     mu  = kwargs.get('mu', None)                  # mu vector for galaxy params
     cov = kwargs.get('cov', None)                 # covariance matrix for galaxy params]
     priorDict = kwargs.get('priorDict', params.getPriorDict()) # priors
+    bprofiles = kwargs.get('bprofiles', None)     # the main galaxy by galaxy array of params
     
     #> image properties kwargs
+    source = kwargs.get('source', kwargs.get('sources', None))
     jims = kwargs.get('jims', None)               # number of images wanted from lens
     mags = kwargs.get('mags', saveFlag['im_mags'])# if wanting image magnifications
     observables = kwargs.get('observables', None) # lensing observables
@@ -378,6 +381,7 @@ def genPop(numGals, **kwargs):
     lenses, bprofiles = genGalPop(redshifts,               # (zl, zs) redshifts      [Nx2 np.array]
                                   galProfiles=galProfs,    # profiles to be included [dic]
                                   paramRanges=paramRanges, # pre-con paramRanges     [dic]
+                                  bprofiles=bprofiles,     # array of per gal params [np.array, dic]
                                   nph=nph,                 # width / 2 for grid      [int]
                                   pix_arc=pix_arc,         # pixel / arcsec convers. [list]
                                   uniform=uniform,         # how to sample params    [bool]
@@ -402,9 +406,9 @@ def genPop(numGals, **kwargs):
     #> generating quads
     srt = time.time()
     quadObject = genQuadPop(lenses,                      # lenses object           [list]
-                            zs=redshifts[:,1],           # source redshifts        [Nx1 np.ndarray]
                             pix_arc=pix_arc,             # pixel / arcsec convers. [list]
                             numSource_gal=numSource_gal, # num sources per gal     [int]
+                            source=source,               # requested source pos    [Nx2 np.ndarray]
                             observables=observables,     # lensing obesrvables     [None or list]
                             verbose=verbose,             # if want print info      [bool]
                             mags=mags,                   # if want magnifications  [bool]
@@ -496,12 +500,8 @@ def genGalPop(redshifts, **kwargs):
     #> imports
     import params
     
-    #> unpacking
-    numGals = len(redshifts)
+    #> kwargs
     gpu = kwargs.get('gpu', False)
-    pix_arc = kwargs.get('pix_arc', [u.pix_arc] * numGals)
-    zl = redshifts[:,0]
-    zs = redshifts[:,1]
     
     #> if on CPU or GPU
     if gpu: import deflectionGPU as deflection
@@ -510,6 +510,12 @@ def genGalPop(redshifts, **kwargs):
     #> creating bprofiles
     bprofiles = kwargs.get('bprofiles', None)
     if bprofiles is None:
+        
+        #> unpacking
+        numGals = len(redshifts)
+        pix_arc = kwargs.get('pix_arc', [u.pix_arc] * numGals)
+        zl = redshifts[:,0]
+        zs = redshifts[:,1]
         
         #> getting precon paramRanges if given
         galProfiles_ = kwargs.get('galProfiles', galProfiles())
@@ -539,24 +545,22 @@ def genGalPop(redshifts, **kwargs):
 
 
 #> generates a population of quads
-def genQuadPop(lenses, zs, **kwargs):
+def genQuadPop(lenses, bprofiles, **kwargs):
     
     #> imports
     import lensing
     
     #> if wanting print statements
     verbose = kwargs.get('verbose', False)
-    
-    #> rejecting sources
-    if kwargs.get('source', None) is not None:
-        error.phrase('Supplied source positions are not supported rn. Cry about it.')
+    warnings = kwargs.get('warnings', True)
     
     #> images + source declarations
     requested_jims = kwargs.get('jims', None)
     numSource_gal = kwargs.get('numSource_gal', 1)
     observables = kwargs.get('observables', None)
     mags = kwargs.get('mags', False)
-    
+    source = kwargs.get('source', kwargs.get('sources', None))
+
     #> if wanting observables w/o specifiying jims
     quad_observables = ['t12', 't23', 't34', 'd2/d1', 'd3/d1', 'd4/d1', 'dt23']
     if observables is not None and requested_jims is None:
@@ -573,15 +577,17 @@ def genQuadPop(lenses, zs, **kwargs):
     images, im_obs, im_mags, sources = [], [], [], []
     all_delx, all_dely, all_lamt = lenses[2:]
     numGals = len(all_delx)
-    all_pix_arc = kwargs.get('pix_arc', [u.pix_arc] * numGals)
     
-    for numGal, delx, dely, lamt, pix_arc in zip(range(numGals), all_delx, all_dely, all_lamt, all_pix_arc):
+    for numGal, delx, dely, lamt in zip(range(numGals), all_delx, all_dely, all_lamt):
         
         #> print statement
         if verbose: print(f'> Lensing {numSource_gal} source(s) for galaxy {numGal+1}!')
         
-        #> getting caustic / source positionsimport lensing
-        source_apexes = lensing.caustic(xgrid, ygrid, delx, dely, pix_arc, lamt)
+        #> getting pix_arc
+        pix_arc = bprofiles[numGal]['pix_arc']
+        
+        #> getting caustic / source positions
+        source_apexes = lensing.caustic(xgrid, ygrid, delx, dely, pix_arc, lamt, warnings=warnings)
         
         #> collecting all requested images
         for i in range(numSource_gal):
@@ -590,8 +596,33 @@ def genQuadPop(lenses, zs, **kwargs):
             ims, numTries, flag = [], maxTries, True
             while (len(ims) != requested_jims) and (numTries > 0) and flag:
                 
-                #> getting random source
-                xs, ys = lensing.ranSources2(source_apexes)[0]
+                #> getting source positions
+                if source is None: #> getting random source
+                
+                    #> random source within caustic
+                    if requested_jims == 5:
+                        xs, ys = lensing.ranSources2(source_apexes)[0]
+                    else:
+                        #> random source within window
+                        xs, ys = random.uniform(-nph, nph), random.uniform(-nph, nph)
+                        
+                else: # if source positions are provided
+                    
+                    #> converting just in case
+                    if isinstance(source[0], float) or isinstance(source[0], int): source =[source]
+                    source = np.array(source)
+                    
+                    #> checking for errors
+                    if (len(source) != numSource_gal) and (len(source) != 1) and (len(source) != numSource_gal*numGals):
+                        error.phrase(f'Incorrect # of sources: #s={len(source)}, #gal={numGals}, #s_gal={numSource_gal}')
+                        
+                    #> checking to see how to unpacking sources
+                    if len(source) == 1:                       # only one source given
+                        xs, ys = source[0]
+                    elif len(source) == numSource_gal:         # one set of matching sources per each galaxy
+                        xs, ys = source[i]
+                    elif len(source) == numSource_gal*numGals: # one source per source per galaxy
+                        xs, ys = source[(numGal*numSource_gal)+i]
                 
                 #> converting units
                 xs /= u.arc_rad
@@ -602,13 +633,13 @@ def genQuadPop(lenses, zs, **kwargs):
                                     ygrid / pix_arc / u.arc_rad, # radians
                                     delx, dely,                  # radians
                                     xs, ys,                      # radians 
-                                    pix_arc, nph)
+                                    pix_arc, nph, ordered=True)
                 
                 #> adjusting tries
                 numTries-=1
                 
                 #> if there is no requested number of jims or requesting specific source
-                if requested_jims is None or kwargs.get('source', None) is not None: 
+                if requested_jims is None or source is not None: 
                     # print('changing flag')
                     flag = False
                     
@@ -641,7 +672,6 @@ def genQuadPop(lenses, zs, **kwargs):
     sources = np.array(sources)
     im_obs = np.array(im_obs)
     im_mags = np.array(im_mags)
-
     
     return images, im_obs, sources, im_mags
 
@@ -801,7 +831,8 @@ if __name__ == '__main__':
     #> single galaxy
     # sysConfig = (zl, zs), galProfs, nph, pix_arc
     # singleGal(sysConfig) # options: plotDict(False), numSource_gal, source=(0.0, 0.0)
-    genPop(numGals=10, redshifts=(0.5, 1.0), verbose=True, suffix='', mags=False, mult=[1,3,4], mu=[0,1])
+    source=[(0,0)]
+    genPop(numGals=1, redshifts=(0.5, 1.0), verbose=True, suffix='', mags=False, source=source, mult=[], mu=[0,1], saveFlag=getSaveDict(False), plotFlag=getPlotDict())
     
 
     # end

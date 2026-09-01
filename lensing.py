@@ -210,7 +210,10 @@ def fims(X, Y, gradx, grady, xs, ys, nph, pix_arc):
 ================================== """
 
 #> finding images
-def lfims(x, y, gradx, grady, xs, ys, pix_arc, nph):
+def lfims(x, y, gradx, grady, xs, ys, pix_arc, nph, **kwargs):
+    
+    #> kwargs
+    ordered = kwargs.get('ordered', True)
     
     #> lens eq, x & y
     deltx = x-gradx-xs
@@ -253,8 +256,9 @@ def lfims(x, y, gradx, grady, xs, ys, pix_arc, nph):
     # if len(images) != 5: print(images)
     
     #> orders based on inverse distance to center + lensing theory
-    if images.shape !=  (0,2):
-        images = arrivalOrder(images, x0=0, y0=0)
+    if ordered:
+        if images.shape != (0,2):
+            images = arrivalOrder(images, x0=0, y0=0)
         
     return np.array(images)
 
@@ -303,9 +307,9 @@ def arrivalOrder(images, x0=0.0, y0=0.0):
         dummy = oims[:-1]
         
         #> finding opposite image
-        dummy = dummy[dummy[:,1].argsort()]             # sorting by angle
-        index = np.where(dummy[:,0] == oims[ind][0])[0] # finding chosen image
-        dummy = np.roll(dummy, shift=-index, axis=0)    # rolling to make 1st (or 4th) image the 1st element
+        dummy = dummy[dummy[:,1].argsort()] # sorting by angle
+        index = np.where(np.all(np.isclose(dummy[:,2:], oims[ind,2:]), axis=1))[0][0]
+        dummy = np.roll(dummy, shift=-index, axis=0)
         
         #> assigning opposite
         if ind == 0: ordered[1] = dummy[2]
@@ -380,31 +384,56 @@ def caustics(x, y, gradx, grady, pix_arc):
     #> getting critical curves
     tcurve, rcurve = ccurves(x, y, gradx, grady, pix_arc)
     
-    #> iterating through each point & back-projecting
-    dcaustic, ocaustic = [], []
-    for tstring, rstring in zip(tcurve, rcurve):
+    #> back-projecting tangential critical curves
+    dcaustic = []
+    for tstring in tcurve:
         
-        #> diamond caustic (from tangential critical curve)
         t_dummy = []
         for tpoint in tstring.coords:
             xp, yp = tpoint
-            t_dummy.append([ xp - fx(xp, yp)[0][0],
-                             yp - fy(xp, yp)[0][0] ])
-        dcaustic.append(LineString(t_dummy)) # converting to linestring
-            
-        #> oval caustic (from radial tangential critical curve)    
+            t_dummy.append([xp - fx(xp, yp)[0][0],
+                            yp - fy(xp, yp)[0][0]])
+        
+        dcaustic.append(LineString(t_dummy))
+        
+    #> back-projecting radial critical curves
+    ocaustic = []
+    for rstring in rcurve:
+        
         o_dummy = []
         for rpoint in rstring.coords:
             xp, yp = rpoint
-            o_dummy.append([ xp - fx(xp, yp)[0][0],
-                             yp - fy(xp, yp)[0][0] ])
-        ocaustic.append(LineString(o_dummy)) # converting to linestring
+            o_dummy.append([xp - fx(xp, yp)[0][0],
+                            yp - fy(xp, yp)[0][0]])
+        
+        ocaustic.append(LineString(o_dummy))
     
     return dcaustic, ocaustic
 
 
+#> returns the area of the caustics
+def causticArea(dcaustic, ocaustic):
+      
+    #> diamond caustic
+    dcaustic_area = None
+    if len(dcaustic) == 1:
+        if len(dcaustic[0].coords) > 4: # needs more than 4 points
+            dcaustic_area = sum(Polygon(c.coords).area for c in dcaustic)
+        
+    #> radial caustic
+    ocaustic_area = None
+    if len(ocaustic) == 1:
+        if len(ocaustic[0].coords) > 4: # needs more than 4 points
+            ocaustic_area = sum(Polygon(c.coords).area for c in ocaustic)
+            
+    return dcaustic_area, ocaustic_area
+
+
 #> returns the points of a rectangular box inscribed by the diamond caustic  
-def causticBox(x, y, gradx, grady, pix_arc, lamt=None):
+def causticBox(x, y, gradx, grady, pix_arc, lamt=None, **kwargs):
+    
+    #> kwargs
+    warnings = kwargs.get('warnings', True)
     
     #> grid size
     nph = int(len(x)/2)
@@ -418,7 +447,7 @@ def causticBox(x, y, gradx, grady, pix_arc, lamt=None):
     # tcurve = []
     contours = measure.find_contours(lamt.T, 0.0)
     if not contours: return [] # if empty (no caustic)
-    if len(contours) > 1: 
+    if len(contours) > 1 and warnings: 
         error.highlight('Tangential critical curve has more than one contour!?')
     
     #> reducing to (likely only) tcurve
@@ -447,14 +476,17 @@ def causticBox(x, y, gradx, grady, pix_arc, lamt=None):
     source_apexes = np.array([xmin, ymin, xmax, ymax])
     
     #> checking to ensure caustic is within the window
-    if any(abs(source_apexes[:,0]) > nph/pix_arc) or any(abs(source_apexes[:,1]) > nph/pix_arc):
+    if (any(abs(source_apexes[:,0]) > nph/pix_arc) or any(abs(source_apexes[:,1]) > nph/pix_arc)) and warnings:
         print('> Caustic points (arcsec):\n', source_apexes)
         error.phrase('Caustic is wider than window!')
     
     return source_apexes # arcsec
 
 #> returns the points of a rectangular box inscribed by the diamond caustic  
-def caustic(x, y, gradx, grady, pix_arc, lamt=None):
+def caustic(x, y, gradx, grady, pix_arc, lamt=None, **kwargs):
+    
+    #> kwargs
+    warnings = kwargs.get('warnings', True)
     
     #> grid size
     nph = int(len(x)/2)
@@ -468,7 +500,7 @@ def caustic(x, y, gradx, grady, pix_arc, lamt=None):
     # tcurve = []
     contours = measure.find_contours(lamt.T, 0.0)
     if not contours: return [] # if empty (no caustic)
-    if len(contours) > 1: 
+    if len(contours) > 1 and warnings: 
         error.highlight('Tangential critical curve has more than one contour!?')
     
     #> reducing to (likely only) tcurve
@@ -490,7 +522,7 @@ def caustic(x, y, gradx, grady, pix_arc, lamt=None):
     source_apexes = np.column_stack((tx - fx_vals, ty - fy_vals))
 
     #> checking to ensure caustic is within the window
-    if any(abs(source_apexes[:,0]) > nph/pix_arc) or any(abs(source_apexes[:,1]) > nph/pix_arc):
+    if (any(abs(source_apexes[:,0]) > nph/pix_arc) or any(abs(source_apexes[:,1]) > nph/pix_arc)) and warnings:
         print('> Caustic points (arcsec):\n', source_apexes)
         error.phrase('Caustic is wider than window!')
     

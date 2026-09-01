@@ -177,9 +177,9 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True,
     ranges, varied_params, depend_params, names = pruneParams(ranges)
     
     #> sets zl, zs, and pix_arc if provided
-    zl = kwargs.get('zl', ranges['zl'])
-    zs = kwargs.get('zs', ranges['zs'])
-    pix_arc = kwargs.get('pix_arc', ranges['pix_arc'])
+    zl = kwargs.get('zl', np.array([ranges['zl']] * numgals))
+    zs = kwargs.get('zs', np.array([ranges['zs']] * numgals))
+    pix_arc = kwargs.get('pix_arc', np.array([float(ranges['pix_arc'])] * numgals))
     uniform = kwargs.get('uniform', False)
     cosmo = kwargs.get('cosmo', u.cosmo)
     
@@ -187,7 +187,7 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True,
     d = len(varied_params) # num dims
     
     #> print the varied paramsW
-    if True:
+    if verbose:
         print('> The varied params are:')
         for var in varied_params:
             print(f'>   {var[0]}, {var[1]}, {var[2]}')
@@ -260,7 +260,7 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True,
                 for prof in ranges[priorLocs[key]['prof']]:
                     prof[priorLocs[key]['param']] = df.loc[i][priorLocs[key]['sample']]
         
-        print(ranges, df.loc[i])
+        # print(ranges, df.loc[i])
         #> unit conversions
             
         #> setting depend params
