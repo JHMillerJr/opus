@@ -1,0 +1,9 @@
+> genlookup_parallel_v2.py 
+
+> zs workers: 20
+> nph: 50
+> old tables: ./priors/look_up_tables/
+> new tables: ./priors/look_up_tables_v2/
+
+> zl = 0.0100
+[2026-09-02T16:30:41.021] error: *** JOB 17814888 ON cn1084 CANCELLED AT 2026-09-02T16:30:41 DUE TO TIME LIMIT ***

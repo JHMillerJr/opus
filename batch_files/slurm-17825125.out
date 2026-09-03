@@ -1,0 +1,106 @@
+> genlookup_parallel_v2.py 
+
+> zs workers: 20
+> nph: 50
+> old tables: ./priors/look_up_tables/
+> new tables: ./priors/look_up_tables_v2/
+
+> zl = 0.0100
+> valid ER: 0.522
+> converged: 0.522
+> saved ./priors/look_up_tables_v2/model_zl_0.01.parquet
+
+> zl = 0.0220
+> valid ER: 0.677
+> converged: 0.676
+> saved ./priors/look_up_tables_v2/model_zl_0.02.parquet
+
+> zl = 0.0490
+> valid ER: 0.774
+> converged: 0.774
+> saved ./priors/look_up_tables_v2/model_zl_0.05.parquet
+
+> zl = 0.0876
+> valid ER: 0.857
+> converged: 0.855
+> saved ./priors/look_up_tables_v2/model_zl_0.09.parquet
+
+> zl = 0.1366
+> valid ER: 0.865
+> converged: 0.864
+> saved ./priors/look_up_tables_v2/model_zl_0.14.parquet
+
+> zl = 0.1950
+> valid ER: 0.865
+> converged: 0.863
+> saved ./priors/look_up_tables_v2/model_zl_0.20.parquet
+
+> zl = 0.2622
+> valid ER: 0.840
+> converged: 0.838
+> saved ./priors/look_up_tables_v2/model_zl_0.26.parquet
+
+> zl = 0.3378
+> valid ER: 0.822
+> converged: 0.817
+> saved ./priors/look_up_tables_v2/model_zl_0.34.parquet
+
+> zl = 0.4214
+> valid ER: 0.791
+> converged: 0.787
+> saved ./priors/look_up_tables_v2/model_zl_0.42.parquet
+
+> zl = 0.5126
+> valid ER: 0.764
+> converged: 0.756
+> saved ./priors/look_up_tables_v2/model_zl_0.51.parquet
+
+> zl = 0.6111
+> valid ER: 0.732
+> converged: 0.726
+> saved ./priors/look_up_tables_v2/model_zl_0.61.parquet
+
+> zl = 0.7169
+> valid ER: 0.710
+> converged: 0.703
+> saved ./priors/look_up_tables_v2/model_zl_0.72.parquet
+
+> zl = 0.8296
+> valid ER: 0.687
+> converged: 0.681
+> saved ./priors/look_up_tables_v2/model_zl_0.83.parquet
+
+> zl = 0.9490
+> valid ER: 0.658
+> converged: 0.651
+> saved ./priors/look_up_tables_v2/model_zl_0.95.parquet
+
+> zl = 1.0751
+> valid ER: 0.636
+> converged: 0.630
+> saved ./priors/look_up_tables_v2/model_zl_1.08.parquet
+
+> zl = 1.2076
+> valid ER: 0.592
+> converged: 0.584
+> saved ./priors/look_up_tables_v2/model_zl_1.21.parquet
+
+> zl = 1.3465
+> valid ER: 0.576
+> converged: 0.567
+> saved ./priors/look_up_tables_v2/model_zl_1.35.parquet
+
+> zl = 1.4916
+> valid ER: 0.537
+> converged: 0.529
+> saved ./priors/look_up_tables_v2/model_zl_1.49.parquet
+
+> zl = 1.6428
+> valid ER: 0.506
+> converged: 0.497
+> saved ./priors/look_up_tables_v2/model_zl_1.64.parquet
+
+> zl = 1.8000
+> valid ER: 0.475
+> converged: 0.467
+> saved ./priors/look_up_tables_v2/model_zl_1.80.parquet

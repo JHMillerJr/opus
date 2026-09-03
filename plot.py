@@ -615,7 +615,47 @@ def priors_correl(df, **kwargs):
     plt.show()
     
     return
-    
+
+""" #> PNGS TO GIF ===================
+================================== """
+
+def pngs_to_gif(loc, scale=1.0, colors=256, duration=100):
+
+    #> imports
+    import os
+    import re
+    import glob
+    from PIL import Image
+
+    #> pngs
+    files = glob.glob(os.path.join(loc,'*.png'))
+    files = sorted(files,
+                   key=lambda x: int(re.findall(r'\d+',os.path.basename(x))[-1]))
+
+    #> target size
+    im0 = Image.open(files[0])
+    size = (int(im0.width*scale),
+            int(im0.height*scale))
+
+    #> frames
+    images = []
+
+    for file in files:
+
+        im = Image.open(file).convert('RGB')
+        im = im.resize(size)
+
+        #> reduce colors
+        im = im.convert('P', palette=Image.ADAPTIVE, colors=colors)
+        images.append(im)
+
+    #> gif
+    images[0].save(os.path.join(loc,'dynamic_pix_arc.gif'),
+                   save_all=True,
+                   append_images=images[1:],
+                   duration=duration,
+                   loop=0,
+                   optimize=True)
 
 """ #> MAIN ==========================
 ================================== """
@@ -626,6 +666,8 @@ if __name__ == '__main__':
     #> name
     import os
     print('> '+os.path.basename(__file__))
+    
+    pngs_to_gif('./figures/dynamic_pix_arc/', scale=0.1)
     
     # end
 # thank

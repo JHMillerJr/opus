@@ -1,10 +1,10 @@
 #!/bin/bash -l
-#SBATCH --time=05:00:00
-#SBATCH --cpus-per-task=32
+#SBATCH --time=10:00:00
+#SBATCH --cpus-per-task=64
 #SBATCH --mem=128g
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=mill9614@umn.edu
 
 module load python3
 source activate millcpu
-python ../ncg_workspace/gentemp_p.py
+python ../priors/genlookup_parallel_v2.py

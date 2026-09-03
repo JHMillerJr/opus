@@ -24,8 +24,8 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 def function():
     
     #> imports  (CHANGE IF GENERATE IS IN DIFF DIR)
-    import generate
     import params
+    import generate
     from modules.units import u; u=u()
     
     #> declarations
@@ -86,9 +86,7 @@ def function():
     #> imports
     import priors
     import lensing
-    import plot
     import modules.geometry as geometry
-    from shapely.geometry import Polygon
     
     #> getting paramRanges
     paramRanges = params.toggleParams(galProfs) # the parameter ranges and values, can be edited

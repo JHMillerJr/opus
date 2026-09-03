@@ -28,13 +28,34 @@ import modules.geometry as geometry
 import modules.error as error
 import modules.parse as parse
 
+#> kwargs hierarchy
+#
+# genPop
+# ├─ output: folder, suffix, saveFlag, plotFlag, verbose, timeFlag
+# ├─ grid: scale_factor, pix_arc, nph
+# ├─ genGalPop
+# │  ├─ gpu
+# │  └─ bprofiles
+# │     ├─ mu, cov, lb, ub, uniform
+# │     └─ sample_priors
+# │        ├─ HMF: log10Mmin, log10Mmax, mdef, ngrid
+# │        ├─ redshift: z_func, z_method, obsFile
+# │        └─ MSR: msr_method
+# └─ genQuadPop
+#    ├─ source
+#    ├─ jims
+#    ├─ mags
+#    └─ observables
+
+# .get(...) = fn uses the parameter
+# **kwargs  = fn forwards parameters
+# kwargs | {...} = fn edits/overrides parameters downstream
 
 """ #> DEFAULTS ======================
 ================================== """
 
 global maxTries
 maxTries = 100
-
 
 #> returns plot dictionary
 def getPlotDict(atleast_one_plot=True, **kwargs):
@@ -44,7 +65,8 @@ def getPlotDict(atleast_one_plot=True, **kwargs):
 
     #> default plotting dict
     plotDict = {'kappa': kwargs.get('kappa', True), 
-                'deflect': kwargs.get('deflect', False), 
+                'deflect': kwargs.get('deflect', False),
+                'ccurves': kwargs.get('ccurves', False),
                 'caustics': kwargs.get('caustics', True), 
                 'caustics_zoom': kwargs.get('caustics_zoom', False)}
     
@@ -75,22 +97,6 @@ def getSaveDict(atleast_one_save=True, **kwargs):
         print(saveDict)
     
     return copy.copy(saveDict)
-
-
-""" #> MEMORY CALC ===================
-================================== """
-
-#> converts memory units
-def bytesto(bytes, to, bsize=1024): 
-    a = {'k' : 1, 'm': 2, 'g' : 3, 't' : 4, 'p' : 5, 'e' : 6 }
-    r = float(bytes)
-    return bytes / (bsize ** a[to])
-
-#> converts memory units
-def tobytes(bytes, from_, bsize=1024): 
-    a = {'k' : 1, 'm': 2, 'g' : 3, 't' : 4, 'p' : 5, 'e' : 6 }
-    r = float(bytes)
-    return bytes / (bsize ** -a[from_])
 
 
 """ #> GRID ==========================
@@ -285,73 +291,43 @@ def genQuad(lens, **kwargs):
 
 #> main gal/quad population fn
 def genPop(numGals, **kwargs):
-    
-    ##### ONE MORE KWARGS = SOURCE
-    
-    #> imports
-    import priors
-    import params
-    
+
     #> declarations
     numGals = int(numGals)                          # number of galaxies to generate
     numSource_gal = kwargs.get('numSource_gal', 1)  # number of sources per galaxy
+    
+    #> setting random seed
+    seed = kwargs.get('seed', None)
+    np.random.seed(seed)
 
     #>>># unpacking kwargs
     
     #> output kwargs
-    verbose  = kwargs.get('verbose', False)                                # printing important 
-    saveFlag = kwargs.get('saveFlag', getSaveDict())                           # saving info
-    timeFlag = kwargs.get('timeFlag', False)                                   # printing time info
-    plotFlag = kwargs.get('plotFlag', getPlotDict(atleast_one_plot=False))     # flag of wether to plot or not
+    saveFlag = kwargs.get('saveFlag', getSaveDict())                       # saving info
+    timeFlag = kwargs.get('timeFlag', False)                               # printing time info
+    plotFlag = kwargs.get('plotFlag', getPlotDict(atleast_one_plot=False)) # flag of wether to plot or not
     folder   = kwargs.get('folder', '+unsorted')                           # data output folder
     suffix   = kwargs.get('suffix', '')                                    # suffix to file name
     if folder is None: folder = '+unsorted'                                # fail safe for default output dir
     
-    #> grid kwargs
-    scale_factor = kwargs.get('scale_factor', 1)                           # a way to increase (or decrease) the grid resolution
-    pix_arc = [kwargs.get('pix_arc', u.pix_arc) * scale_factor] * numGals  # pixel per arcsec conversion
-    nph = kwargs.get('nph', u.nph)              * scale_factor             # width / 2 of grid
-    
-    #> galaxy properties kwargs
+    #> galaxy profiles kwargs
     nfw  = kwargs.get('nfw', True)                # if want nfw profile
     hern = kwargs.get('hern', True)               # if want hernquist profile
     mult = kwargs.get('mult', [])                 # multipoles requested to be in the galaxies
     ex   = kwargs.get('ex', False)                # if want external shear
-    galProfs = kwargs.get('galProfs', galProfiles (nfw=nfw, hern=hern, mult=mult, ex=ex)) # default galaxy profiles
-    paramRanges = kwargs.get('paramRanges', None) # the paramRanges from params, list of all parmas for each profile
-    redshifts = kwargs.get('redshifts', priors.ranRedshifts(numGals))                  # randomized default redshifts (might result in NCGs)
-    if isinstance(redshifts, tuple): redshifts = np.array([redshifts] * numGals)# converting redshifts if tuple, i.e., supplied as (zl, zs)
-    uniform = kwargs.get('uniform', False)        # sampling galaxy params uniformly instead of Gaussian
-    lb  = kwargs.get('lb', None)                  # lower bounds for galaxy params (i.e., bprofiles)
-    ub  = kwargs.get('ub', None)                  # upper bounds for galaxy params
-    mu  = kwargs.get('mu', None)                  # mu vector for galaxy params
-    cov = kwargs.get('cov', None)                 # covariance matrix for galaxy params]
-    priorDict = kwargs.get('priorDict', params.getPriorDict()) # priors
-    bprofiles = kwargs.get('bprofiles', None)     # the main galaxy by galaxy array of params
-    
-    #> image properties kwargs
-    source = kwargs.get('source', kwargs.get('sources', None))
-    jims = kwargs.get('jims', None)               # number of images wanted from lens
-    mags = kwargs.get('mags', saveFlag['im_mags'])# if wanting image magnifications
-    observables = kwargs.get('observables', None) # lensing observables
+    galProfs = kwargs.get('galProfs', galProfiles(nfw=nfw, hern=hern, mult=mult, ex=ex)) # default galaxy profiles
+    kwargs |= {'galProfs': galProfs}
     
     #> checking if requesting, but not saving (or vice-versa)
+    mags = kwargs.get('mags', saveFlag['im_mags'])# if wanting image magnifications
+    observables = kwargs.get('observables', None) # lensing observables
     if mags and not saveFlag['im_mags']:
         error.highlight('Requesting mags without requesting to save them. Changing saveFlag[im_mags]=True')
         saveFlag['im_mags'] = True
     if observables is None and saveFlag['im_obs']:
         error.highlight('Requesting observables without supply which ones. Changing saveFlag[im_obs]=False')
         saveFlag['im_obs'] = False
-    
-    #> computation kwargs
-    gpu = kwargs.get('gpu', False) # if should use GPU (or CPU) [currently broken]
-    
-    #> converting to np arrays
-    to_convert = [lb, ub, mu, cov]
-    for i, var in enumerate(to_convert):
-        if var is not None:
-            to_convert[i] = np.asarray(var)
-    lb, ub, mu, cov = to_convert
+    kwargs |= {'saveFlag': saveFlag}
     
     #<<<# finished unpacking kwargs
     
@@ -361,6 +337,7 @@ def genPop(numGals, **kwargs):
     dt = str(int( (datetime.now().second*1e3 + datetime.now().microsecond/1e4) / 10 )).zfill(4) # second + millisecond info
     fileName = time.strftime('%y%m%d%H%M', time.localtime())
     fileName += dt + suffix                              # file date information 
+    kwargs |= {'fileName': fileName, 'dirPath': dirPath} # adding file information
     
     #> print statement
     galProfs_print = []
@@ -378,20 +355,7 @@ def genPop(numGals, **kwargs):
     
     #> generating galaxies (this should cover all possible arguments)
     srt = time.time()
-    lenses, bprofiles = genGalPop(redshifts,               # (zl, zs) redshifts      [Nx2 np.array]
-                                  galProfiles=galProfs,    # profiles to be included [dic]
-                                  paramRanges=paramRanges, # pre-con paramRanges     [dic]
-                                  bprofiles=bprofiles,     # array of per gal params [np.array, dic]
-                                  nph=nph,                 # width / 2 for grid      [int]
-                                  pix_arc=pix_arc,         # pixel / arcsec convers. [list]
-                                  uniform=uniform,         # how to sample params    [bool]
-                                  lb=lb,                   # lower bounds vector     [None or Nx1 np.array]
-                                  ub=ub,                   # upper bounds vector     [None or Nx1 np.array]
-                                  mu=mu,                   # mu vector               [None or Nx1 np.array]
-                                  cov=cov,                 # covariance matrix       [None or NxN np.array]
-                                  priorDict=priorDict,     # prior dictionary        [dic]
-                                  gpu=gpu,                 # if using GPU            [bool]
-                                  verbose=verbose)         # if want print info      [bool]
+    lenses, bprofiles = genGalPop(numGals, **kwargs)
     if timeFlag: print(f'> Generating galaxies took {time.time()-srt:.2f} s')
     
     #<&># object information
@@ -403,16 +367,12 @@ def genPop(numGals, **kwargs):
     #> dely   = (numGals, nph*2, nph*2) [np.ndarray]
     #> lamt   = (numGals, nph*2, nph*2) [np.ndarray]
     
+    #> updating bprofiles
+    kwargs |= {'bprofiles': bprofiles}
+    
     #> generating quads
     srt = time.time()
-    quadObject = genQuadPop(lenses,                      # lenses object           [list]
-                            pix_arc=pix_arc,             # pixel / arcsec convers. [list]
-                            numSource_gal=numSource_gal, # num sources per gal     [int]
-                            source=source,               # requested source pos    [Nx2 np.ndarray]
-                            observables=observables,     # lensing obesrvables     [None or list]
-                            verbose=verbose,             # if want print info      [bool]
-                            mags=mags,                   # if want magnifications  [bool]
-                            jims=jims)                   # num ims per source      [int]
+    quadObject = genQuadPop(lenses=lenses, **kwargs)
     if timeFlag: print(f'> Generating quads took {time.time()-srt:.2f} s')
     
     #> unpacking quad object
@@ -460,15 +420,15 @@ def genPop(numGals, **kwargs):
         maxPlot = 20
         
         #> unpacking info
-        all_pix_arc = pix_arc
         xgrid, ygrid = lenses[:2]
         all_delx, all_dely, all_lamt = lenses[2:]
         
         #> plotting!
-        for i, delx, dely, lamt, pix_arc, _ in zip(range(numGals), all_delx, all_dely, all_lamt, all_pix_arc, range(maxPlot)):
+        for i, delx, dely, lamt, bprof, _ in zip(range(numGals), all_delx, all_dely, all_lamt, bprofiles, range(maxPlot)):
             
             #> getting images
             ims = np.array([images[i]])
+            pix_arc = bprof[i]['pix_arc']
             
             #> kappa
             if plotFlag['kappa']:
@@ -477,6 +437,10 @@ def genPop(numGals, **kwargs):
             #> deflection angles
             if plotFlag['deflect']:
                 plot.deflect(xgrid, ygrid, delx, dely, images=ims)
+                
+            #> critical curves
+            if plotFlag['ccurves']:
+                plot.ccurves(xgrid, ygrid, delx, dely, pix_arc=pix_arc, images=ims)
             
             #> caustics
             if plotFlag['caustics']:
@@ -495,27 +459,25 @@ def genPop(numGals, **kwargs):
 
 
 #> generates a population of galaxies
-def genGalPop(redshifts, **kwargs):
+def genGalPop(numGals, **kwargs):
     
     #> imports
     import params
     
     #> kwargs
     gpu = kwargs.get('gpu', False)
-    
+    redshifts = kwargs.get('redshifts', None)
+    bprofiles = kwargs.get('bprofiles', None)
+
     #> if on CPU or GPU
     if gpu: import deflectionGPU as deflection
     else: import deflectionCPU2 as deflection
     
     #> creating bprofiles
-    bprofiles = kwargs.get('bprofiles', None)
     if bprofiles is None:
         
-        #> unpacking
-        numGals = len(redshifts)
+        #> unpacking (NEED TO ALLOW FOR VARYING PIX_ARC)
         pix_arc = kwargs.get('pix_arc', [u.pix_arc] * numGals)
-        zl = redshifts[:,0]
-        zs = redshifts[:,1]
         
         #> getting precon paramRanges if given
         galProfiles_ = kwargs.get('galProfiles', galProfiles())
@@ -525,7 +487,8 @@ def genGalPop(redshifts, **kwargs):
         
         #> creating bprofiles
         bprofiles = params.bprofiles(numGals, paramRanges, 
-                                     zl=zl, zs=zs, pix_arc=pix_arc,
+                                     redshifts=redshifts, 
+                                     pix_arc=pix_arc,
                                      verbose=kwargs.get('verbose', False), 
                                      cov=kwargs.get('cov', None), 
                                      mu=kwargs.get('mu', None),
@@ -533,7 +496,7 @@ def genGalPop(redshifts, **kwargs):
                                      lb=kwargs.get('lb', None),
                                      uniform=kwargs.get('uniform', False),
                                      priorDict=kwargs.get('priorDict', params.getPriorDict()))
-        
+    
     #> grid declarations
     nph = kwargs.get('nph', u.nph)
     xgrid, ygrid = grid(nph=nph)
@@ -627,6 +590,7 @@ def genQuadPop(lenses, bprofiles, **kwargs):
                 #> converting units
                 xs /= u.arc_rad
                 ys /= u.arc_rad
+                xs, ys = 0,0 # \beta=(0,0) for testing
             
                 #> lensing!
                 ims = lensing.lfims(xgrid / pix_arc / u.arc_rad, # radians
@@ -647,11 +611,22 @@ def genQuadPop(lenses, bprofiles, **kwargs):
             if observables is not None and requested_jims == 5:
                 if len(ims) != 5: # if NOT QUAD! UH OH, STINKY
                     print(ims, numTries, flag)
+                    plot.ccurves(xgrid, ygrid, delx, dely, pix_arc)
                     plot.causticBox(xgrid, ygrid, delx, dely, pix_arc, source_apexes, xs=xs, ys=ys)
-                    plot.caustics(xgrid, ygrid, delx, dely, pix_arc, images=[ims], xs=xs, ys=ys)
-                    plot.caustics(xgrid, ygrid, delx, dely, pix_arc, images=[ims], zoom=5, xs=xs, ys=ys)
+                    # plot.caustics(xgrid, ygrid, delx, dely, pix_arc, images=[ims], xs=xs, ys=ys)
+                    # plot.caustics(xgrid, ygrid, delx, dely, pix_arc, images=[ims], zoom=5, xs=xs, ys=ys)
                 obs = geometry.lensObs((0, 0), ims, observables)
                 im_obs.append(obs)
+            
+            #> calculates einstein radius (for testing)
+            if False: 
+                observables = ['d01', 'd02', 'd03', 'd04']
+                lens_obs = geometry.lensObs(origin=(0,0), mages=ims, observables=observables)
+                ER_meas = np.mean(lens_obs)
+                print(ER_meas)
+            
+            # plot.ccurves(xgrid, ygrid, delx, dely, pix_arc, images=ims, outFile=f'dynamic_pix_arc/dynamic_pix_arc_{numGal}.png')
+            # plot.causticBox(xgrid, ygrid, delx, dely, pix_arc, source_apexes, xs=xs, ys=ys, images=ims)
                 
             #> if wanting magnifications
             if mags: im_mags.append(getMag((xgrid, ygrid, delx, dely), pix_arc, ims))
@@ -669,10 +644,10 @@ def genQuadPop(lenses, bprofiles, **kwargs):
     
     #> to numpy
     images = np.array(images, dtype=object)
-    sources = np.array(sources)
-    im_obs = np.array(im_obs)
-    im_mags = np.array(im_mags)
-    
+    sources = np.array(sources, dtype=float).reshape(numGals*numSource_gal, 2)
+    im_obs = np.array(im_obs, dtype=object)
+    im_mags = np.array(im_mags, dtype=object)
+
     return images, im_obs, sources, im_mags
 
 

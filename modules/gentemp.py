@@ -9,10 +9,61 @@
 import os
 import sys
 import numpy as np
+import pandas as pd
 
-#> adding dir to sys paths
+#> adding dir to sys paths (for MSI)
 sys.path.append(os.path.dirname(__file__)) 
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
+
+#> hmf
+hmf_log10Mmin = 11.5
+hmf_log10Mmax = 14.5
+hmf_mdef = 'vir'
+hmf_ngrid = 4096
+
+#> redshifts
+red_method = '2D'
+red_func = 'assign'
+red_z_buffer = 0.1
+
+#> msr
+msr_method = '18mowla'
+msr_sigma = None
+
+#> grid kwargs
+grid_kw = {
+    'nph': 50,
+    'pix_arc': 60,
+    'scale_factor': 1,
+}
+
+#> sampling kwargs
+sample_kw = {
+    'mu': None,
+    'cov': None,
+    'lb': None,
+    'ub': None,
+    'uniform': False,
+}
+
+#> prior kwargs
+prior_kw = {
+    'log10Mmin': 11.5,
+    'log10Mmax': 14.5,
+    'mdef': 'vir',
+    'ngrid': 4096,
+    'z_func': 'assign',
+    'z_method': '2D',
+    'msr_method': '18mowla',
+}
+
+#> quad kwargs
+#quad_kw = {
+##    'jims': 5,
+#    'mags': False,
+#    'observables': observables,
+#}
 
 """ #> GENERATE FN ===================
 ================================== """
@@ -22,23 +73,35 @@ def function():
     
     #> imports  (CHANGE IF GENERATE IS IN DIFF DIR)
     import generate
+    import params
+    from modules.units import u; u=u()
     
     #> declarations
     numGals       = 10                         # total # of galaxies to generate
     numSource_gal = 1                          # total # of sources per galaxy
     
+    #> random seed
+    seed = 42                                  # numpy random seed
+    
+    #> cosmology
+    cosmo = u.cosmo                            # default cosmology dict
+    cosmo['h0'] = 70.0                         # hubble param
+    cosmo['omega_m_0'] = 0.27                  # matter density
+    cosmo['omega_lam_0'] = 1-cosmo['omega_m_0']# cosmological constant
+    
     #> output kwargs
     folder   = '+unsorted'                     # dir in dataDir to save data
     suffix   = ''                              # suffix to add to file names
-    verbose  = True                            # if wanting extra print info
+    verbose  = False                           # if wanting extra print info
     timeFlag = False                           # if wanting time info
-    saveFlag = generate.getSaveDict()          # what to save (images=im_obs=sources=bprofiles=True, im_mags=lens=False)
+    saveFlag = generate.getSaveDict(False)     # what to save (images=im_obs=sources=bprofiles=True, im_mags=lens=False)
     plotFlag = generate.getPlotDict(False)     # what to plot (kappa=caustics=True, deflect=caustics_zoom=False)
     
     #> grid kwargs
     scale_factor = 1                           # increase (or decrease) grid resolution [default=1]
     pix_arc      = 60                          # pixel per arcsec conversion [default=60]
     nph          = 50                          # width / 2 of grid [default=50)
+    pix_arc = np.tile(pix_arc, numGals)        # array for pix_arc
     
     #> galaxy profiles kwargs (what profiles to add)
     nfw  = True                                # adds a nfw profile [default=True]
@@ -55,20 +118,33 @@ def function():
     uniform = False                            # if sampling from uniform dist, i.e., (lb, ub), False=TruncNorm
     
     #> redshifts
-    zl = 0.5                                   # redshift of lens
-    zs = 1.0                                   # redshift of source
-    redshifts = (zl, zs)                       # combined redshifts (for code)
+    supplyRed = False                          # if wanting to supply redshifts (otherwise, draws from priors)
+    if supplyRed:                              # can either be array or single
+        zl = 0.5                               # redshift of lens
+        zs = 1.0                               # redshift of source
+        redshifts = np.tile((zl,zs), (numGals,1)) # combined redshifts (for code)
+    else:
+        redshifts = None                       # must be none (will draw from priors if red=True)
+    
+    #> priors (right now: turning on one turns on ALL)
+    hmf  = True                                # halo mass function
+    cmr  = True                                # concentration-mass relation
+    shmr = True                                # stellar-to-halo mass relation
+    msr  = True                                # stellar mass-size relation
+    red  = not supplyRed                       # redshift distribution
+    priorDict = params.getPriorDict(hmf=hmf, cmr=cmr, shmr=shmr, msr=msr, red=red) # if wanting to draw from priors (hmf, cmr, shmr, msr)
     
     #> image properties kwargs
     jims = 5                                   # number of request images from each source (5=quad)
-    mags = False                               # if wanting image magnifications (will change saveFlag automatically)
+    mags = None                                # if wanting image magnifications (will change saveFlag automatically)
     observables = ['t12', 't23', 't34', 'd2/d1', 'd3/d1' ,'d4/d1', 'dt23'] # requested lensing observables
+    
+    #> bprofiles & paramRanges (can be edited)
+    paramRanges = None
+    bprofiles = None
     
     #> paramRanges: can be edited to change param values, fit, etc.
     if True:
-        
-        #> imports
-        import params
         
         #> getting paramRanges
         paramRanges = params.toggleParams(galProfs) # the parameter ranges and values, can be edited
@@ -78,13 +154,11 @@ def function():
         #>            dict.keys() = ['x0', ...], dict.keys() = ['init', 'min', 'max', 'fit']
         
         #> example
-        # paramRanges['nfw'][0]['x0']['fit'] = False
-
-    else: paramRanges = None
+        # paramRanges['nfw'][0]['axisrat']['fit'] = True
         
-    #> computatoin kwargs
-    gpu = False                                # CURRENTLY NO GPU IMPLEMENTATION
-    
+        pass
+
+
     #> generating!
     generate.genPop(numGals,                      # # galaxies
                     numSource_gal=numSource_gal,  # # sources per galaxy
@@ -98,7 +172,9 @@ def function():
                     pix_arc=pix_arc,              # pixel per arcsec conversion for grid
                     nph=nph,                      # width / 2 for grid
                     galProfs=galProfs,            # galaxy profiles
+                    priorDict=priorDict,          # what to draw from priors
                     paramRanges=paramRanges,      # the galaxy params, (see params)
+                    bprofiles=bprofiles,          # the main array used to gen galaxies
                     lb=lb,                        # lower bounds for gal params
                     ub=ub,                        # upper bounds for gal params
                     mu=mu,                        # mu vector for gal params
@@ -108,7 +184,8 @@ def function():
                     jims=jims,                    # requested number of images per source
                     mags=mags,                    # if want image mags
                     observables=observables,      # requested lensing observables
-                    gpu=gpu)                      # if want to run on gpu (CURRENTLY NO GPU IMPLEMENTATION)
+                    seed=seed,                    # random seed
+                    gpu=False)                    # if want to run on gpu (CURRENTLY NO GPU IMPLEMENTATION)
     
     return
 

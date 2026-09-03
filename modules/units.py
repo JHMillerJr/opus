@@ -39,6 +39,17 @@ class u():
         self.pix_arc = 60
         self.nph = 50
         
+    #> converts memory units
+    def bytesto(bytes, to, bsize=1024): 
+        a = {'k' : 1, 'm': 2, 'g' : 3, 't' : 4, 'p' : 5, 'e' : 6 }
+        return bytes / (bsize ** a[to])
+
+    #> converts memory units
+    def tobytes(bytes, from_, bsize=1024): 
+        a = {'k' : 1, 'm': 2, 'g' : 3, 't' : 4, 'p' : 5, 'e' : 6 }
+        return bytes / (bsize ** -a[from_])
+
+        
         
 """ #> MAIN ==========================
 ================================== """

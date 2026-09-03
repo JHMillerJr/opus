@@ -36,10 +36,6 @@ from modules.units import u; u=u()
 import modules.error as error
 
 
-""" #> CONTOUR INTERSECTION ==========
-================================== """
-
-
 """ #> PARALLEL FIMS =================
 ================================== """
 
@@ -93,8 +89,9 @@ def pfimsFn(x, y, gradx, grady, lamt, pix_arc, nph, observables, profiles):
     #> if caustic area is 0? or very small?
     if Polygon(source_apexes).area < 1e-6:
         import plot
-        plot.caustics(x, y, gradx, grady, pix_arc=60, outFile='zero-caustic')
-        plot.causticBox(x, y, gradx, grady, boxPoints=source_apexes, pix_arc=60, outFile='caustic-box', zoom=1)
+        plot.caustics(x, y, gradx, grady, pix_arc=pix_arc, outFile='zero-caustic')
+        plot.ccurves(x, y, gradx, grady, pix_arc=pix_arc)
+        plot.causticBox(x, y, gradx, grady, boxPoints=source_apexes, pix_arc=pix_arc, outFile='caustic-box', zoom=1)
         print('NO CAUSTIC!')
         os._exit()
     
@@ -638,7 +635,7 @@ def ranSources2(source_apexes, snum=1):
     
     #> polygon
     poly = Polygon(source_apexes)
-    if poly.area <= 1e-6: 
+    if poly.area <= 1e-9: 
         print(poly.area)
         print('CAUSTIC AREA IS TOO SMALL!')
         return None
