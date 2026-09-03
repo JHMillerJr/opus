@@ -33,28 +33,14 @@ obs_redshift_file = '../observed_quads/redshifts.csv'
 ================================== """
 
 #> sampling from the priors
-def sample_priors(numGals, priorDict, nph, **kwargs):
-    
-    #> preloading zl files
-    # lookup.preload_lookup_v3(verbose=True)
+def sample_priors(numGals, priorDict, nph, cosmo=u.cosmo, **kwargs):
     
     #> parent kwargs
     redshifts  = kwargs.get('redshifts', None) # list of redshifts
-    cosmo      = kwargs.get('cosmo', u.cosmo)  # cosmology
     obsFile    = kwargs.get('obsFile', obs_redshift_file) # observed redshift file
     z_func     = kwargs.get('z_func', 'assign')# the function to sample redshifts
     z_method   = kwargs.get('z_method', '2D')  # the method to sample redshifts
     seed       = kwargs.get('seed', None)      # random seed
-    
-    #> lookup interpolation kwargs
-    interp_zl    = kwargs.get('interp_zl',    False)
-    interp_zs    = kwargs.get('interp_zs',    False)
-    interp_mvir  = kwargs.get('interp_mvir',  True)
-    interp_mstar = kwargs.get('interp_mstar', True)
-    interp_re    = kwargs.get('interp_re',    True)
-    interp_kw    = {'interp_zl': interp_zl, 'interp_zs': interp_zs,
-                    'interp_mvir': interp_mvir, 'interp_mstar': interp_mstar,
-                    'interp_re': interp_re}
     
     #> setting random seed
     np.random.seed(seed)
@@ -146,10 +132,7 @@ def sample_priors(numGals, priorDict, nph, **kwargs):
     
     #> initial sample
     df = sample(df)
-    
-    srt = time.time()
-    df = lookup.firstLook_selFunc_v3(df, nph=nph, **interp_kw)
-    print(time.time()-srt)
+    df = lookup.firstLook_selFunc(df)
     
     #> redraw rejected galaxies
     tries = maxTries * 10
@@ -161,7 +144,7 @@ def sample_priors(numGals, priorDict, nph, **kwargs):
         #> resampling at fixed redshifts
         df_resample = df.loc[mask,['zl','zs']].copy().reset_index(drop=True)
         df_resample = sample(df_resample)
-        df_resample = lookup.firstLook_selFunc_v3(df_resample, nph=nph, **interp_kw)
+        df_resample = lookup.firstLook_selFunc(df_resample)
         
         #> replacing
         cols = df_resample.columns
@@ -176,10 +159,14 @@ def sample_priors(numGals, priorDict, nph, **kwargs):
         pass
         #error.phrase(f'Could not find accepted samples for {sum(~df["sel"])} galaxies')
     
+    #> setting pix_arc
+    r_pix_percentage = 0.25
+    r_pix = nph * r_pix_percentage
+    df['pix_arc'] = r_pix / df['ER'] # (# pix / 1 ER) * (1 ER /  # arcsec)
+    
     cols = ['zl', 'zs', 'd_area', 'pix_arc', 'ER']
     # print(df[cols])
-    # print(df.to_string())
-    # df.to_csv('lookup.csv')
+    print(df.to_string())
     
     return df
 

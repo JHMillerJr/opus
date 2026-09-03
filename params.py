@@ -156,11 +156,9 @@ def getPriorDict(hmf=False, cmr=False, shmr=False, msr=False, red=False, **kwarg
 
 
 #> returns batch profiles for deflections based on parameter ranges
-def bprofiles(numGals, ranges=paramRanges(), **kwargs):
-    
-    #> kwargs
-    verbose = kwargs.get('verbose', False)
-    seed = kwargs.get('seed', None)
+def bprofiles(numgals, ranges=paramRanges(), verbose=True, 
+              cov=None, mu=None, ub=None, lb=None, 
+              priorDict=getPriorDict(), **kwargs):
     
     #> changing varied params based on priors
     priorLocs = {'hmf' : {'prof':  'nfw', 'param':       'logmass', 'sample':  'log10_M_vir'},
@@ -169,7 +167,6 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
                  'msr' : {'prof': 'hern', 'param':        'effrad', 'sample':        'R_eff'},}
     
     #> iterating thru priors
-    priorDict = kwargs.get('priorDict', getPriorDict())
     if any(priorDict.values()):      # if there is at least one prior
         for key in priorDict.keys(): # iterating thru each prior
             if not priorDict[key] or key in ['red']: continue # if not used, continue
@@ -181,7 +178,8 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
     ranges, varied_params, depend_params, names = pruneParams(ranges)
         
     #> pix_arc, etc.
-    pix_arc = kwargs.get('pix_arc', np.array([float(ranges['pix_arc'])] * numGals))
+    pix_arc = kwargs.get('pix_arc', np.array([float(ranges['pix_arc'])] * numgals))
+    nph = kwargs.get('nph', u.nph)
     uniform = kwargs.get('uniform', False)
     cosmo = kwargs.get('cosmo', u.cosmo)
     
@@ -202,20 +200,11 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
     
     #> IM NOT SURE IF I NEED THIS OR IF EVERYTHING AFTER THIS WILL BE OKAY WITH D=0 (i think it's okay)
     if d: # if there are varied parameters (otherwise can skip)
-    
-        #> unpacking kwargs
-        mu  = kwargs.get('mu', None)
-        cov = kwargs.get('cov', None)
-        ub  = kwargs.get('ub', None)
-        lb  = kwargs.get('lb', None)
         
         #> creating mean vector and u&l bounds
         if mu is None: mu = np.array([ x['init'] for x in varied_params[:,3] ]) # means (init)
-        else: mu = np.array(mu)
         if ub is None: ub = np.array([ x['max']  for x in varied_params[:,3] ]) # upper bound (max)
-        else: ub = np.array(ub)
         if lb is None: lb = np.array([ x['min']  for x in varied_params[:,3] ]) # lower bound (min)
-        else: lb = np.array(lb)
         
         #> getting parameter range
         rng = np.subtract(ub, lb) # param range
@@ -228,7 +217,6 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
             if cov is None:
                 cov = np.identity(d)
                 cov = cov * (rng * std_range_perc / 100)**2 # squares to std --> var
-            else: cov = np.array(cov).reshape(d,d)
             
             if verbose: # if want to print cov and std
                 # print('> The params being varied are:\n', varied_params[:,0:2])
@@ -238,25 +226,21 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
                 print()
             
             #> sampling from the truncated multivariate normal distribution
-            tmvn = TruncatedMVN(mu, cov, lb, ub, seed=seed)
-            samples = tmvn.sample(numGals)
+            tmvn = TruncatedMVN(mu, cov, lb, ub)
+            samples = tmvn.sample(numgals)
             samples = np.array(samples) #, dtype=np.float32) #> converts to cupy float32 
             
         #> if wanting a uniform distribution
         elif uniform:
             
             #> sampling from uniform dist
-            samples = np.random.uniform(low=lb, high=ub, size=(numGals, d)).T
+            samples = np.random.uniform(low=lb, high=ub, size=(numgals, d)).T
             
             
     #> drawing from priors
     if any(priorDict.values()):
-        
-        #> drawing from priors
         import priors # importing priors
-        nph = kwargs.get('nph', u.nph)
-        kwargs_priors = {k:v for k,v in kwargs.items() if k not in ['nph','priorDict']}
-        df = priors.sample_priors(numGals, priorDict, nph, **kwargs_priors)
+        df = priors.sample_priors(numGals=numgals, priorDict=priorDict, nph=nph, cosmo=cosmo, redshifts=redshifts)
 
         #> overwriting redshifts & pix_arc
         redshifts = df[['zl', 'zs']].to_numpy()
@@ -264,7 +248,7 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
             
     #> creating batch profiles!
     batch_profiles = [] # each element is a galaxy
-    for i in range(numGals):
+    for i in range(numgals):
         
         #> setting redshifts & pix_arc
         ranges['zl'] = redshifts[i][0]
