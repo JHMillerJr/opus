@@ -31,6 +31,7 @@ def paramRanges():
     #> profiles
     ranges = {'zl': 0.5,     # lens redshift
               'zs': 1.0,     # source redshift
+              'nph': 50,     # width of grid
               'pix_arc': 60, # pix/arc conversion
               'nfw': [ # nfw
                      {'name': 'p01',
@@ -176,17 +177,22 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True,
     
     #> pruning non-varied params
     ranges, varied_params, depend_params, names = pruneParams(ranges)
+    
+    #> getting redshifts
+    if priorDict['red'] is False:
+        zl = kwargs.get('zl', np.array([ranges['zl']] * numgals))
+        zs = kwargs.get('zs', np.array([ranges['zs']] * numgals))
+    else:
+        zl = kwargs.get('zl', None)
+        zs = kwargs.get('zs', None)
+        if (zl is not None) and (zs is not None):
+            error.highlight('Requesting redshifts from prior, but providing all redshifts')
         
     #> pix_arc, etc.
     pix_arc = kwargs.get('pix_arc', np.array([float(ranges['pix_arc'])] * numgals))
-    nph = kwargs.get('nph', u.nph)
+    nph = kwargs.get('nph', ranges['nph'])
     uniform = kwargs.get('uniform', False)
     cosmo = kwargs.get('cosmo', u.cosmo)
-    
-    #> checking
-    redshifts = kwargs.get('redshifts', None)
-    if (redshifts is None) and (not priorDict['red']):
-        redshifts = np.array([ranges['zl'], ranges['zs']]).reshape(1,2)
     
     #> number of varied parameters
     d = len(varied_params) # num dims
@@ -240,19 +246,15 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True,
     #> drawing from priors
     if any(priorDict.values()):
         import priors # importing priors
-        df = priors.sample_priors(numGals=numgals, priorDict=priorDict, nph=nph, cosmo=cosmo, redshifts=redshifts)
-
-        #> overwriting redshifts & pix_arc
-        redshifts = df[['zl', 'zs']].to_numpy()
-        pix_arc = df['pix_arc']
+        df = priors.sample_priors(numGals=numgals, priorDict=priorDict, nph=nph, cosmo=cosmo, zls=zl)
             
     #> creating batch profiles!
     batch_profiles = [] # each element is a galaxy
     for i in range(numgals):
         
         #> setting redshifts & pix_arc
-        ranges['zl'] = redshifts[i][0]
-        ranges['zs'] = redshifts[i][1]
+        ranges['zl'] = zl[i]
+        ranges['zs'] = zs[i]
         ranges['pix_arc'] = pix_arc[i]
         
         #> setting varied params
@@ -263,7 +265,7 @@ def bprofiles(numgals, ranges=paramRanges(), verbose=True,
         #> iterating thru priors
         if any(priorDict.values()):      # if there is at least one prior
             for key in priorDict.keys(): # iterating thru each prior
-                if not priorDict[key] or key in ['red']: continue # if not used, continue
+                if not priorDict[key]: continue # if not used, continue
                 for prof in ranges[priorLocs[key]['prof']]:
                     prof[priorLocs[key]['param']] = df.loc[i][priorLocs[key]['sample']]
         

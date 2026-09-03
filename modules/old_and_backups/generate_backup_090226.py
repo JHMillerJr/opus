@@ -28,28 +28,6 @@ import modules.geometry as geometry
 import modules.error as error
 import modules.parse as parse
 
-#> kwargs hierarchy
-#
-# genPop
-# ├─ output: folder, suffix, saveFlag, plotFlag, verbose, timeFlag
-# ├─ grid: scale_factor, pix_arc, nph
-# ├─ genGalPop
-# │  ├─ gpu
-# │  └─ bprofiles
-# │     ├─ mu, cov, lb, ub, uniform
-# │     └─ sample_priors
-# │        ├─ HMF: log10Mmin, log10Mmax, mdef, ngrid
-# │        ├─ redshift: z_func, z_method, obsFile
-# │        └─ MSR: msr_method
-# └─ genQuadPop
-#    ├─ source
-#    ├─ jims
-#    ├─ mags
-#    └─ observables
-
-# .get(...) = fn uses the parameter
-# **kwargs  = fn forwards parameters
-# kwargs | {...} = fn edits/overrides parameters downstream
 
 """ #> DEFAULTS ======================
 ================================== """
@@ -66,8 +44,7 @@ def getPlotDict(atleast_one_plot=True, **kwargs):
 
     #> default plotting dict
     plotDict = {'kappa': kwargs.get('kappa', True), 
-                'deflect': kwargs.get('deflect', False),
-                'ccurves': kwargs.get('ccurves', False),
+                'deflect': kwargs.get('deflect', False), 
                 'caustics': kwargs.get('caustics', True), 
                 'caustics_zoom': kwargs.get('caustics_zoom', False)}
     
@@ -350,7 +327,8 @@ def genPop(numGals, **kwargs):
     bprofiles = kwargs.get('bprofiles', None)     # the main galaxy by galaxy array of params
     
     #> redshifts
-    redshifts = kwargs.get('redshifts', None)     # redshift of lenses
+    redshifts = kwargs.get('redshifts', priors.ranRedshifts(numGals)) # randomized default redshifts (might result in NCGs)
+    if isinstance(redshifts, tuple): redshifts = np.array([redshifts] * numGals) # converting redshifts if tuple, i.e., supplied as (zl, zs)
     
     #> galaxy parameter sampling kwargs (non-prior params)
     uniform = kwargs.get('uniform', False)        # sampling galaxy params uniformly instead of Gaussian
@@ -408,8 +386,7 @@ def genPop(numGals, **kwargs):
     
     #> generating galaxies (this should cover all possible arguments)
     srt = time.time()
-    lenses, bprofiles = genGalPop(numGals,                 # number of galaxies
-                                  redshifts=redshifts,     # (zl, zs) redshifts      [Nx2 np.array]
+    lenses, bprofiles = genGalPop(redshifts,               # (zl, zs) redshifts      [Nx2 np.array]
                                   galProfiles=galProfs,    # profiles to be included [dic]
                                   paramRanges=paramRanges, # pre-con paramRanges     [dic]
                                   bprofiles=bprofiles,     # array of per gal params [np.array, dic]
@@ -438,6 +415,7 @@ def genPop(numGals, **kwargs):
     srt = time.time()
     quadObject = genQuadPop(lenses=lenses,               # lenses object           [list]
                             bprofiles=bprofiles,         # array of lens props     [np.ndarray]
+                            pix_arc=pix_arc,             # pixel / arcsec convers. [list]
                             numSource_gal=numSource_gal, # num sources per gal     [int]
                             source=source,               # requested source pos    [Nx2 np.ndarray]
                             observables=observables,     # lensing obesrvables     [None or list]
@@ -508,10 +486,6 @@ def genPop(numGals, **kwargs):
             #> deflection angles
             if plotFlag['deflect']:
                 plot.deflect(xgrid, ygrid, delx, dely, images=ims)
-                
-            #> critical curves
-            if plotFlag['ccurves']:
-                plot.ccurves(xgrid, ygrid, delx, dely, pix_arc=pix_arc, images=ims)
             
             #> caustics
             if plotFlag['caustics']:
@@ -530,25 +504,36 @@ def genPop(numGals, **kwargs):
 
 
 #> generates a population of galaxies
-def genGalPop(numGals, **kwargs):
+def genGalPop(redshifts, **kwargs):
     
     #> imports
     import params
     
     #> kwargs
     gpu = kwargs.get('gpu', False)
-    redshifts = kwargs.get('redshifts', None)
-    bprofiles = kwargs.get('bprofiles', None)
     
     #> if on CPU or GPU
     if gpu: import deflectionGPU as deflection
     else: import deflectionCPU2 as deflection
     
     #> creating bprofiles
+    bprofiles = kwargs.get('bprofiles', None)
     if bprofiles is None:
         
-        #> unpacking (NEED TO ALLOW FOR VARYING PIX_ARC)
+        #> checking redshifts
+        if redshifts is None:
+            
+            #> draw from priors
+            priorDict = kwargs.get('priorDict', params.getPriorDict())
+            
+            
+            # error.phrase('bprofiles not supplied and redshifts is None')
+        
+        #> unpacking
+        numGals = len(redshifts)
         pix_arc = kwargs.get('pix_arc', [u.pix_arc] * numGals)
+        zl = redshifts[:,0]
+        zs = redshifts[:,1]
         
         #> getting precon paramRanges if given
         galProfiles_ = kwargs.get('galProfiles', galProfiles())
@@ -558,8 +543,7 @@ def genGalPop(numGals, **kwargs):
         
         #> creating bprofiles
         bprofiles = params.bprofiles(numGals, paramRanges, 
-                                     redshifts=redshifts, 
-                                     pix_arc=pix_arc,
+                                     zl=zl, zs=zs, pix_arc=pix_arc,
                                      verbose=kwargs.get('verbose', False), 
                                      cov=kwargs.get('cov', None), 
                                      mu=kwargs.get('mu', None),
@@ -661,8 +645,6 @@ def genQuadPop(lenses, bprofiles, **kwargs):
                 #> converting units
                 xs /= u.arc_rad
                 ys /= u.arc_rad
-                
-                xs, ys = 0,0
             
                 #> lensing!
                 ims = lensing.lfims(xgrid / pix_arc / u.arc_rad, # radians
@@ -683,24 +665,11 @@ def genQuadPop(lenses, bprofiles, **kwargs):
             if observables is not None and requested_jims == 5:
                 if len(ims) != 5: # if NOT QUAD! UH OH, STINKY
                     print(ims, numTries, flag)
-                    plot.ccurves(xgrid, ygrid, delx, dely, pix_arc)
                     plot.causticBox(xgrid, ygrid, delx, dely, pix_arc, source_apexes, xs=xs, ys=ys)
-                    # plot.caustics(xgrid, ygrid, delx, dely, pix_arc, images=[ims], xs=xs, ys=ys)
-                    # plot.caustics(xgrid, ygrid, delx, dely, pix_arc, images=[ims], zoom=5, xs=xs, ys=ys)
+                    plot.caustics(xgrid, ygrid, delx, dely, pix_arc, images=[ims], xs=xs, ys=ys)
+                    plot.caustics(xgrid, ygrid, delx, dely, pix_arc, images=[ims], zoom=5, xs=xs, ys=ys)
                 obs = geometry.lensObs((0, 0), ims, observables)
                 im_obs.append(obs)
-            
-            observables = ['d01', 'd02', 'd03', 'd04']
-            
-            lens_obs = geometry.lensObs(origin=(0,0),
-                                        images=ims,
-                                        observables=observables)
-            
-            ER_meas = np.mean(lens_obs)
-            print(ER_meas)
-            
-            plot.ccurves(xgrid, ygrid, delx, dely, pix_arc, images=ims)
-            plot.causticBox(xgrid, ygrid, delx, dely, pix_arc, source_apexes, xs=xs, ys=ys, images=ims)
                 
             #> if wanting magnifications
             if mags: im_mags.append(getMag((xgrid, ygrid, delx, dely), pix_arc, ims))
