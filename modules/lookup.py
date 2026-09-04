@@ -11,8 +11,12 @@ import sys
 import numpy as np
 import pandas as pd
 
+#> file
+import json
+
 #> caching
 from functools import lru_cache
+from itertools import product
 
 #> adding dir to sys paths
 sys.path.append(os.path.dirname(__file__)) 
@@ -292,6 +296,177 @@ def plot_lookup(df):
         plt.show()
         
     return
+
+
+""" #> V3 LOOK-UP TABLES =============
+================================== """
+
+#> loads v3 look-up bins
+@lru_cache(maxsize=1)
+def load_lookup_grid_v3(loc='./priors/look_up_tables_v3/'):
+
+    #> loading metadata
+    with open(os.path.join(loc,'lookup_grid_v3.json')) as f:
+        meta = json.load(f)
+
+    #> grids
+    bins = {'zl':         np.asarray(meta['zl_grid']),
+            'zs':         np.asarray(meta['zs_grid']),
+            'logmvir':    np.asarray(meta['logmvir_grid']),
+            'mstar_nsig': np.asarray(meta['mstar_nsig_grid']),
+            're_nsig':    np.asarray(meta['re_nsig_grid'])}
+
+    return bins
+
+#> preloads all v3 look-up tables
+def preload_lookup_v3(loc='./priors/look_up_tables_v3/', verbose=False):
+
+    #> timing
+    if verbose:
+        import time
+        srt = time.time()
+
+    #> loading bins
+    bins = load_lookup_grid_v3(loc)
+
+    #> loading every zl table into cache
+    for izl in range(len(bins['zl'])):
+        load_model_table_v3(izl,loc)
+
+    #> timing
+    if verbose:
+        print(f'look-up tables loaded in {time.time()-srt:.3f} s')
+
+    return None
+
+#> loads one zl look-up table
+@lru_cache(maxsize=None)
+def load_model_table_v3(izl, loc='./priors/look_up_tables_v3/'):
+
+    #> lens redshift
+    zl = load_lookup_grid_v3(loc)['zl'][izl]
+
+    #> loading needed columns
+    fileName = os.path.join(loc,f'model_zl_{zl:.2f}.parquet')
+    table = pd.read_parquet(fileName, columns=['ER','d_area','d_area_max'])
+
+    return table.to_numpy()
+
+
+#> grid indices and weights
+def _grid_v3(x, grid, interp=True):
+
+    #> below grid
+    if x <= grid[0]:
+        return ((0,1.0),)
+
+    #> above grid
+    if x >= grid[-1]:
+        return ((len(grid)-1,1.0),)
+
+    #> surrounding bins
+    i1 = np.searchsorted(grid,x)
+    i0 = i1-1
+
+    #> nearest
+    if not interp:
+
+        if x-grid[i0] <= grid[i1]-x:
+            return ((i0,1.0),)
+
+        return ((i1,1.0),)
+
+    #> interpolation
+    w = (x-grid[i0])/(grid[i1]-grid[i0])
+
+    return ((i0,1-w),(i1,w))
+
+
+#> applies v3 first-look selection
+def firstLook_selFunc_v3(df, **kwargs):
+
+    #> kwargs
+    resolution = kwargs.get('resolution', 0.15)
+    nph = kwargs.get('nph', 50)
+    r_pix_percentage = kwargs.get('r_pix_percentage', 0.5)
+    loc = kwargs.get('lookup_loc','./priors/look_up_tables_v3/')
+
+    #> interpolation
+    interp_zl    = kwargs.get('interp_zl',   False)
+    interp_zs    = kwargs.get('interp_zs',   False)
+    interp_mvir  = kwargs.get('interp_mvir', True)
+    interp_mstar = kwargs.get('interp_mstar',True)
+    interp_re    = kwargs.get('interp_re',   True)
+
+    #> grids
+    bins = load_lookup_grid_v3(loc)
+
+    #> dimensions
+    nmvir  = len(bins['logmvir'])
+    nmstar = len(bins['mstar_nsig'])
+    nre    = len(bins['re_nsig'])
+
+    #> galaxy parameters
+    galaxies = df[['zl',
+                   'zs',
+                   'log10_M_vir',
+                   'mstar_nsig',
+                   're_nsig']].to_numpy()
+
+    #> declarations
+    vals = np.zeros((len(df),3))
+
+    #> look-up
+    for i, (zl, zs, logmvir, mstar_nsig, re_nsig) in enumerate(galaxies):
+
+        #> indices and weights
+        zinds = _grid_v3(zl,bins['zl'], interp_zl)
+        sinds = _grid_v3(zs,bins['zs'], interp_zs)
+        hinds = _grid_v3(logmvir,bins['logmvir'], interp_mvir)
+        minds = _grid_v3(mstar_nsig,bins['mstar_nsig'], interp_mstar)
+        rinds = _grid_v3(re_nsig,bins['re_nsig'], interp_re)
+
+        #> surrounding points
+        for (izl,wz),(izs,ws),(ih,wh),(im,wm),(ir,wr) in product(zinds,sinds,hinds,minds,rinds):
+
+            #> total weight
+            w = wz*ws*wh*wm*wr
+
+            #> flattened row
+            ind = (((izs*nmvir + ih)*nmstar + im)*nre + ir)
+
+            #> adding point
+            vals[i] += w*load_model_table_v3(izl,loc)[ind]
+
+    #> unpacking
+    ER = vals[:,0]
+    d_area = vals[:,1]
+    d_area_max = vals[:,2]
+
+    #> quad probability
+    p_quad = np.divide(d_area, d_area_max,
+                       out=np.zeros_like(d_area),
+                       where=d_area_max > 0)
+
+    p_quad = np.clip(p_quad,0,1)
+
+    #> pixel scale
+    pix_arc = np.divide(nph*r_pix_percentage, ER,
+                        out=np.full_like(ER,np.nan),
+                        where=ER > 0)
+
+    #> saving
+    df['ER'] = ER
+    df['d_area'] = d_area
+    df['d_area_max'] = d_area_max
+    df['p_quad'] = p_quad
+    df['pix_arc'] = pix_arc
+
+    #> selection
+    df['sel'] = ((ER >= resolution) & np.isfinite(ER) &
+                 (np.random.random(len(df)) < p_quad))
+
+    return df
 
 
 """ #> MAIN ==========================

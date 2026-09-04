@@ -80,10 +80,19 @@ def function():
     numGals       = 10                         # total # of galaxies to generate
     numSource_gal = 1                          # total # of sources per galaxy
     
+    #> random seed
+    seed = 42                                  # numpy random seed
+    
+    #> cosmology
+    cosmo = u.cosmo                            # default cosmology dict
+    cosmo['h0'] = 70.0                         # hubble param
+    cosmo['omega_m_0'] = 0.27                  # matter density
+    cosmo['omega_lam_0'] = 1-cosmo['omega_m_0']# cosmological constant
+    
     #> output kwargs
     folder   = '+unsorted'                     # dir in dataDir to save data
     suffix   = ''                              # suffix to add to file names
-    verbose  = True                            # if wanting extra print info
+    verbose  = False                           # if wanting extra print info
     timeFlag = False                           # if wanting time info
     saveFlag = generate.getSaveDict(False)     # what to save (images=im_obs=sources=bprofiles=True, im_mags=lens=False)
     plotFlag = generate.getPlotDict(False)     # what to plot (kappa=caustics=True, deflect=caustics_zoom=False)
@@ -92,6 +101,7 @@ def function():
     scale_factor = 1                           # increase (or decrease) grid resolution [default=1]
     pix_arc      = 60                          # pixel per arcsec conversion [default=60]
     nph          = 50                          # width / 2 of grid [default=50)
+    pix_arc = np.tile(pix_arc, numGals)        # array for pix_arc
     
     #> galaxy profiles kwargs (what profiles to add)
     nfw  = True                                # adds a nfw profile [default=True]
@@ -108,26 +118,25 @@ def function():
     uniform = False                            # if sampling from uniform dist, i.e., (lb, ub), False=TruncNorm
     
     #> redshifts
-    supplyRed = False                           # if wanting to supply redshifts (otherwise, draws from priors)
+    supplyRed = False                          # if wanting to supply redshifts (otherwise, draws from priors)
     if supplyRed:                              # can either be array or single
         zl = 0.5                               # redshift of lens
         zs = 1.0                               # redshift of source
-        redshifts = (zl, zs)                   # combined redshifts (for code)
+        redshifts = np.tile((zl,zs), (numGals,1)) # combined redshifts (for code)
     else:
         redshifts = None                       # must be none (will draw from priors if red=True)
     
-    #> priors
-    hmf  = False                               # halo mass function
-    cmr  = False                               # concentration-mass relation
-    shmr = False                               # stellar-to-halo mass relation
-    msr  = False                               # stellar mass-size relation
-    red  = True                                # redshift distribution
-    if not supplyRed: red = True               # will draw from redshift prior if not supply redshifts
+    #> priors (right now: turning on one turns on ALL)
+    hmf  = True                                # halo mass function
+    cmr  = True                                # concentration-mass relation
+    shmr = True                                # stellar-to-halo mass relation
+    msr  = True                                # stellar mass-size relation
+    red  = not supplyRed                       # redshift distribution
     priorDict = params.getPriorDict(hmf=hmf, cmr=cmr, shmr=shmr, msr=msr, red=red) # if wanting to draw from priors (hmf, cmr, shmr, msr)
     
     #> image properties kwargs
     jims = 5                                   # number of request images from each source (5=quad)
-    mags = None                               # if wanting image magnifications (will change saveFlag automatically)
+    mags = None                                # if wanting image magnifications (will change saveFlag automatically)
     observables = ['t12', 't23', 't34', 'd2/d1', 'd3/d1' ,'d4/d1', 'dt23'] # requested lensing observables
     
     #> bprofiles & paramRanges (can be edited)
@@ -145,7 +154,7 @@ def function():
         #>            dict.keys() = ['x0', ...], dict.keys() = ['init', 'min', 'max', 'fit']
         
         #> example
-        # paramRanges['nfw'][0]['x0']['fit'] = False
+        # paramRanges['nfw'][0]['axisrat']['fit'] = True
         
         pass
 
@@ -175,6 +184,7 @@ def function():
                     jims=jims,                    # requested number of images per source
                     mags=mags,                    # if want image mags
                     observables=observables,      # requested lensing observables
+                    seed=seed,                    # random seed
                     gpu=False)                    # if want to run on gpu (CURRENTLY NO GPU IMPLEMENTATION)
     
     return
