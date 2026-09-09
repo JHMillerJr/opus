@@ -16,55 +16,6 @@ sys.path.append(os.path.dirname(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 
-#> hmf
-hmf_log10Mmin = 11.5
-hmf_log10Mmax = 14.5
-hmf_mdef = 'vir'
-hmf_ngrid = 4096
-
-#> redshifts
-red_method = '2D'
-red_func = 'assign'
-red_z_buffer = 0.1
-
-#> msr
-msr_method = '18mowla'
-msr_sigma = None
-
-#> grid kwargs
-grid_kw = {
-    'nph': 50,
-    'pix_arc': 60,
-    'scale_factor': 1,
-}
-
-#> sampling kwargs
-sample_kw = {
-    'mu': None,
-    'cov': None,
-    'lb': None,
-    'ub': None,
-    'uniform': False,
-}
-
-#> prior kwargs
-prior_kw = {
-    'log10Mmin': 11.5,
-    'log10Mmax': 14.5,
-    'mdef': 'vir',
-    'ngrid': 4096,
-    'z_func': 'assign',
-    'z_method': '2D',
-    'msr_method': '18mowla',
-}
-
-#> quad kwargs
-#quad_kw = {
-##    'jims': 5,
-#    'mags': False,
-#    'observables': observables,
-#}
-
 """ #> GENERATE FN ===================
 ================================== """
 
@@ -78,7 +29,7 @@ def function():
     
     #> declarations
     numGals       = 10                         # total # of galaxies to generate
-    numSource_gal = 1                          # total # of sources per galaxy
+    numSource_gal = 10                         # total # of sources per galaxy
     
     #> random seed
     seed = 42                                  # numpy random seed

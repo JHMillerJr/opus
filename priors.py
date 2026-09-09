@@ -41,9 +41,6 @@ def sample_priors(numGals, priorDict, nph, **kwargs):
     #> parent kwargs
     redshifts  = kwargs.get('redshifts', None) # list of redshifts
     cosmo      = kwargs.get('cosmo', u.cosmo)  # cosmology
-    obsFile    = kwargs.get('obsFile', obs_redshift_file) # observed redshift file
-    z_func     = kwargs.get('z_func', 'assign')# the function to sample redshifts
-    z_method   = kwargs.get('z_method', '2D')  # the method to sample redshifts
     seed       = kwargs.get('seed', None)      # random seed
     
     #> lookup interpolation kwargs
@@ -59,43 +56,34 @@ def sample_priors(numGals, priorDict, nph, **kwargs):
     #> setting random seed
     np.random.seed(seed)
     
-    #> 
+    #> msr kwargs
     msr_method = kwargs.get('msr_method', '18mowla') # what stellar mass-size relation to use
-    
     
     #> declarations
     msr_func = {'14wel':   mass_r_relation_14wel,   # MSR from 14 van der Wel+
                 '18mowla': mass_r_relation_18mowla, # MSR from 18 Mowla+
                 '25cook':  mass_r_relation_25cook}  # MSR from 25 Cook+
     
-    #> getting function to sample redshifts
-    z_funcs = {'assign': assign_redshifts,          # assigns redshifts from obs dist
-               'random': ranRedshifts,              # draws randomly (can edit redshift dist)
-               'sample1D': sample_obsRedshifts_1D,  # draws randomly from obs marginal dist
-               'sample2D': sample_obsRedshifts_2D,} # draws randomly from obs joint dist
-    z_func = z_funcs[z_func]
-    
-
     #> sampling redshifts
     if redshifts is None: redshifts = np.full((numGals,2), None, dtype=object)
     if np.all(redshifts[:,0] == None):
         
         #> if both redshifts are missing
         if np.all(redshifts[:,1] == None):
-            redshifts = z_func(numGals, method=z_method)
+            redshifts = drawRedshifts(numGals, **kwargs)
         else: 
             #> if only zl is missing (zs is known)
             redshifts[:,0] = np.array([ 
                              conditional_redshifts(z=zs,
                                                    known='zs',
-                                                   obsFile=obsFile)
+                                                   **kwargs)
                              for zs in np.array(redshifts[:,1]) ]) # iterating thru each zs
     #> if zl is supplied, if zs is not supplied
     elif np.all(redshifts[:,1] == None):
         redshifts[:,1] = np.array([ 
                          conditional_redshifts(z=zl,
                                                known='zl',
-                                               obsFile=obsFile)
+                                               **kwargs)
                          for zl in np.array(redshifts[:,0]) ]) # iterating thru each zl
 
     #> initializing dataframe
@@ -148,11 +136,12 @@ def sample_priors(numGals, priorDict, nph, **kwargs):
     df = sample(df)
     
     srt = time.time()
-    df = lookup.firstLook_selFunc_v3(df, nph=nph, **interp_kw)
-    print(time.time()-srt)
+    df = lookup.firstLook_selFunc_v3(df, nph=nph, **interp_kw, **kwargs)
+    # print(time.time()-srt)
     
     #> redraw rejected galaxies
-    tries = maxTries * 10
+    factor = 10
+    tries = maxTries * factor
     while any(~df['sel']) and tries > 0:
         
         #> rejected galaxies
@@ -161,7 +150,7 @@ def sample_priors(numGals, priorDict, nph, **kwargs):
         #> resampling at fixed redshifts
         df_resample = df.loc[mask,['zl','zs']].copy().reset_index(drop=True)
         df_resample = sample(df_resample)
-        df_resample = lookup.firstLook_selFunc_v3(df_resample, nph=nph, **interp_kw)
+        df_resample = lookup.firstLook_selFunc_v3(df_resample, nph=nph, **interp_kw, **kwargs)
         
         #> replacing
         cols = df_resample.columns
@@ -171,10 +160,9 @@ def sample_priors(numGals, priorDict, nph, **kwargs):
         tries -= 1
         
     #> checking if all lenses were accepted
-    print(tries)
+    print(f'> Sampling priors took {maxTries*factor - tries} tries!')
     if any(~df['sel']):
-        pass
-        #error.phrase(f'Could not find accepted samples for {sum(~df["sel"])} galaxies')
+        error.highlight(f'Could not find accepted samples for {sum(~df["sel"])} galaxies')
     
     cols = ['zl', 'zs', 'd_area', 'pix_arc', 'ER']
     # print(df[cols])
@@ -186,6 +174,22 @@ def sample_priors(numGals, priorDict, nph, **kwargs):
 
 """ #> REDSHIFT ======================
 ================================== """
+
+#> main redshift prior function
+def drawRedshifts(numGals, **kwargs):
+    
+    #> kwargs
+    red_func = kwargs.get('red_func', 'random')
+    
+    #> getting function to sample redshifts
+    z_funcs = {'assign': assign_redshifts,          # assigns redshifts from obs dist
+               'random': ranRedshifts,              # draws randomly (can edit redshift dist)
+               'sample1D': sample_obsRedshifts_1D,  # draws randomly from obs marginal dist
+               'sample2D': sample_obsRedshifts_2D,} # draws randomly from obs joint dist
+    z_func = z_funcs[red_func]
+    
+    return z_func(numGals, **kwargs)
+    
 
 #> returns random redshifts
 #> currently calibrated from obs distribution
@@ -223,7 +227,7 @@ def ranRedshifts(numGals, **kwargs):
     df_samples = pd.DataFrame(np.array(samples).T, columns=['zl', 'zs'])
     
     #> checking for unphysical samples
-    tries = maxTries
+    tries = maxTries * 10
     mask = ( (df_samples['zs'] - df_samples['zl'] <= z_buffer) | # zs >= zl + buffer
              (df_samples['zl'] <= 0) |                           # zl > 0
              (df_samples['zs'] <= 0) )                           # zs > 0
@@ -236,14 +240,14 @@ def ranRedshifts(numGals, **kwargs):
         df_samples.loc[mask, ['zl','zs']] = re_samples
         
         #> checking mask again
-        mask = ( (df_samples['zs'] - df_samples['zl'] >= z_buffer) | 
+        mask = ( (df_samples['zs'] - df_samples['zl'] <= z_buffer) | 
                  (df_samples['zl'] <= 0) | 
                  (df_samples['zs'] <= 0) )
         tries -= 1
         
     #> checking if enough physical samples were found
     if any(mask):
-        error.phrase('Could not find enough physical samples')
+        error.phrase('Could not find enough physical random redshift samples')
     
     return df_samples.to_numpy()
 

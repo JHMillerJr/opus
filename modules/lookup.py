@@ -463,8 +463,19 @@ def firstLook_selFunc_v3(df, **kwargs):
     df['pix_arc'] = pix_arc
 
     #> selection
-    df['sel'] = ((ER >= resolution) & np.isfinite(ER) &
-                 (np.random.random(len(df)) < p_quad))
+    sel_res = kwargs.get('sel_res', True)
+    sel_slcs = kwargs.get('sel_slcs', True)
+    
+    #> selection effects
+    if sel_res and sel_slcs:
+        df['sel'] = ((ER >= resolution) & np.isfinite(ER) &
+                     (np.random.random(len(df)) < p_quad))
+    
+    if sel_res and not sel_slcs:
+        df['sel'] = ((ER >= resolution) & np.isfinite(ER))
+        
+    if not sel_res and sel_slcs:
+        df['sel'] = ((np.random.random(len(df)) < p_quad))
 
     return df
 

@@ -89,7 +89,8 @@ def getSaveDict(atleast_one_save=True, **kwargs):
                 'im_mags': kwargs.get('im_mags', False), 
                 'sources': kwargs.get('sources', True),
                 'lens': kwargs.get('lens', False), 
-                'bprofiles': kwargs.get('bprofiles', True)}
+                'bprofiles': kwargs.get('bprofiles', True),
+                'paramRanges': kwargs.get('paramRanges', True)}
     
     #> making all false if wanted
     if not atleast_one_save:
@@ -306,6 +307,7 @@ def genPop(numGals, **kwargs):
     saveFlag = kwargs.get('saveFlag', getSaveDict())                       # saving info
     timeFlag = kwargs.get('timeFlag', False)                               # printing time info
     plotFlag = kwargs.get('plotFlag', getPlotDict(atleast_one_plot=False)) # flag of wether to plot or not
+    parent_dir = kwargs.get('parent_dir', '')                              # parent dir where data folder is
     folder   = kwargs.get('folder', '+unsorted')                           # data output folder
     suffix   = kwargs.get('suffix', '')                                    # suffix to file name
     if folder is None: folder = '+unsorted'                                # fail safe for default output dir
@@ -333,7 +335,8 @@ def genPop(numGals, **kwargs):
     
     #> file information
     if folder != '' and folder[-1] != '/': folder += '/' # formatting, if necessary
-    dirPath = dataDir + folder                           # main outFile path
+    if parent_dir != '' and parent_dir[-1] != '/': parent_dir += '/' # formatting, if necessary
+    dirPath = parent_dir + dataDir + folder                           # main outFile path
     dt = str(int( (datetime.now().second*1e3 + datetime.now().microsecond/1e4) / 10 )).zfill(4) # second + millisecond info
     fileName = time.strftime('%y%m%d%H%M', time.localtime())
     fileName += dt + suffix                              # file date information 
@@ -403,6 +406,8 @@ def genPop(numGals, **kwargs):
         if not saveFlag['im_mags']: im_mags = None
         if not saveFlag['sources']: sources = None
         if not saveFlag['bprofiles']: bprofiles = None
+        if not saveFlag['paramRanges']: paramRanges = None
+        else: paramRanges = kwargs.get('paramRanges', None)
         
         #> saving
         saveInfo_multipleFiles(dirPath, fileName, suffix, # file/path naming
@@ -411,7 +416,8 @@ def genPop(numGals, **kwargs):
                                im_mags=im_mags,           # image magnifications
                                sources=sources,           # source positions
                                lens=lens,                 # lens info (see above)
-                               bprofiles=bprofiles)       # bprofiles (inclues pix_arc)
+                               bprofiles=bprofiles,       # bprofiles (inclues pix_arc)
+                               paramRanges=paramRanges)   # param ranges
     
     #> plotting many lenses
     if any(plotFlag.values()):
@@ -427,8 +433,8 @@ def genPop(numGals, **kwargs):
         for i, delx, dely, lamt, bprof, _ in zip(range(numGals), all_delx, all_dely, all_lamt, bprofiles, range(maxPlot)):
             
             #> getting images
-            ims = np.array([images[i]])
-            pix_arc = bprof[i]['pix_arc']
+            ims = np.array([images[i*numSource_gal]])
+            pix_arc = bprof['pix_arc']
             
             #> kappa
             if plotFlag['kappa']:
@@ -466,7 +472,6 @@ def genGalPop(numGals, **kwargs):
     
     #> kwargs
     gpu = kwargs.get('gpu', False)
-    redshifts = kwargs.get('redshifts', None)
     bprofiles = kwargs.get('bprofiles', None)
 
     #> if on CPU or GPU
@@ -476,9 +481,6 @@ def genGalPop(numGals, **kwargs):
     #> creating bprofiles
     if bprofiles is None:
         
-        #> unpacking (NEED TO ALLOW FOR VARYING PIX_ARC)
-        pix_arc = kwargs.get('pix_arc', [u.pix_arc] * numGals)
-        
         #> getting precon paramRanges if given
         galProfiles_ = kwargs.get('galProfiles', galProfiles())
         paramRanges = kwargs.get('paramRanges', None)
@@ -487,15 +489,7 @@ def genGalPop(numGals, **kwargs):
         
         #> creating bprofiles
         bprofiles = params.bprofiles(numGals, paramRanges, 
-                                     redshifts=redshifts, 
-                                     pix_arc=pix_arc,
-                                     verbose=kwargs.get('verbose', False), 
-                                     cov=kwargs.get('cov', None), 
-                                     mu=kwargs.get('mu', None),
-                                     ub=kwargs.get('ub', None),
-                                     lb=kwargs.get('lb', None),
-                                     uniform=kwargs.get('uniform', False),
-                                     priorDict=kwargs.get('priorDict', params.getPriorDict()))
+                                     **kwargs)
     
     #> grid declarations
     nph = kwargs.get('nph', u.nph)
@@ -552,6 +546,13 @@ def genQuadPop(lenses, bprofiles, **kwargs):
         #> getting caustic / source positions
         source_apexes = lensing.caustic(xgrid, ygrid, delx, dely, pix_arc, lamt, warnings=warnings)
         
+        if len(source_apexes) == 0:
+            print(numGal)
+            print(source_apexes)
+            print(lensing.ranSources2(source_apexes))
+            plot.ccurves(xgrid, ygrid, delx, dely, pix_arc)
+            plot.causticBox(xgrid, ygrid, delx, dely, pix_arc, source_apexes)
+        
         #> collecting all requested images
         for i in range(numSource_gal):
             
@@ -590,7 +591,7 @@ def genQuadPop(lenses, bprofiles, **kwargs):
                 #> converting units
                 xs /= u.arc_rad
                 ys /= u.arc_rad
-                xs, ys = 0,0 # \beta=(0,0) for testing
+                # xs, ys = 0,0 # \beta=(0,0) for testing
             
                 #> lensing!
                 ims = lensing.lfims(xgrid / pix_arc / u.arc_rad, # radians
@@ -753,6 +754,7 @@ def saveInfo_multipleFiles(dirPath, fileName, suffix, **kwargs):
     sources   = kwargs.get('sources', None)
     lens      = kwargs.get('lens', None)
     bprofiles = kwargs.get('bprofiles', None)
+    paramRanges = kwargs.get('paramRanges', None)
     
     #> saving data
     if images    is not None and images.size!=0 :  np.save(parent_dir + fileName[:-1] + '_images', images)
@@ -761,6 +763,7 @@ def saveInfo_multipleFiles(dirPath, fileName, suffix, **kwargs):
     if sources   is not None and sources.size!=0 : np.save(parent_dir + fileName[:-1] + '_srcs', sources)
     if lens      is not None: np.save(parent_dir + fileName[:-1] + '_lens', lens)
     if bprofiles is not None: np.save(parent_dir + fileName[:-1] + '_bprofiles', bprofiles)
+    if paramRanges is not None: np.save(parent_dir + fileName[:-1] + '_paramRanges', paramRanges)
 
     return
 

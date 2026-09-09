@@ -38,7 +38,7 @@ def paramRanges():
                       'y0':            {'init':  0.0, 'min':-0.1, 'max':0.1, 'fit': False},   # y center of profile
                       'logmass':       {'init':   13, 'min':  10, 'max': 14, 'fit': False},   # log_10(M) [solMass]
                       'concentration': {'init':    7, 'min':   2, 'max': 10, 'fit': False},   # concentration []
-                      'axisrat':       {'init': 0.75, 'min': 0.5, 'max':0.95,'fit': False},    # axis ratio []
+                      'axisrat':       {'init': 0.85, 'min': 0.5, 'max':0.95,'fit': False},    # axis ratio []
                       'theta':         {'init':  0.0, 'min': 0.0, 'max':90.0,'fit': False},    # position angle [deg]
                       'add': True}],
               'hern': [ # hern
@@ -63,7 +63,7 @@ def paramRanges():
                        'y0':    {'init':'p02', 'min':-0.1, 'max': 0.1, 'fit': False},   # y center of profile
                        'norm':  {'init': 5e-3, 'min': 0.0, 'max':0.05, 'fit': False},    # normalization []
                        'slope': {'init':  2.0, 'min': 2.0, 'max': 2.0, 'fit': False},   # slope []
-                       'theta': {'init': 10.0, 'min': -180,'max': 180, 'fit': False},   # position angle [deg]
+                       'theta': {'init':  0.0, 'min': -180,'max': 180, 'fit': False},   # position angle [deg]
                        'add': True},
                       {'m': 4,  # m num
                        'x0':    {'init':'p02', 'min':-0.1, 'max': 0.1, 'fit': False},   # x center of profile 

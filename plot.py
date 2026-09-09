@@ -297,10 +297,9 @@ def ccurves(x, y, gradx, grady, pix_arc,
     
     #> plotting images
     if images is not None:
-        ax.scatter(images[:,0],
-                   images[:,1],
-                   zorder=5, s=imSize, label=len(images[:,0]))
-        plt.legend(framealpha=1, edgecolor='1', prop={'weight':'bold'})
+        if len(images.shape) != 3:
+            images = np.array([images])
+        plotImages(ax, images)
     
     #> zoom function! :)
     ax.set_xlim(np.array(ax.get_xlim())/zoom)

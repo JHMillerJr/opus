@@ -18,6 +18,9 @@ import codecs
 import json
 import pickle
 
+#> larger folder glob
+from pathlib import Path
+
 #> modules
 from modules import error
 
@@ -227,6 +230,33 @@ def toPickle(fileName, cucumber):
     return
 
 
+""" #> TO LLRW =======================
+================================== """
+
+#> batch convert to txt
+def batch_to_txt(loc, pattern, target):
+    
+    #> iterating through files 
+    files = Path(loc).rglob(pattern)
+    for file in files:
+        npy_to_txt(file, target)
+    
+    return
+
+#> converts numpy to txt for liliya
+def npy_to_txt(fileName, target):
+    
+    #> opening file
+    data = np.load(fileName, allow_pickle=True)
+    
+    if target == '':
+        new_fileName = (str(fileName)[:-3] + 'txt')
+    else:
+        new_fileName = target + (str(fileName)[:-3] + 'txt').replace('\\', '/').split('/')[-1]
+        
+    np.savetxt(new_fileName, data, newline='\n')
+    
+    return
 
 """ #> MAIN ==========================
 ================================== """
@@ -238,7 +268,11 @@ if __name__ == '__main__':
     print('> '+os.path.basename(__file__))
     
     dirPath = './data/+unsorted/2607171519'
-    fromDIRtoDFs(dirPath, verbose=True, keys=['images'])
+    # fromDIRtoDFs(dirPath, verbose=True, keys=['images'])
+    
+    loc = '../opus_lmfi/data/260909_comp1/'
+    pattern = '*_obs*.npy'
+    batch_to_txt(loc, pattern, loc)
     
     #data, keys = fromNPY(file)
     #print(data['im_obs'][0])
