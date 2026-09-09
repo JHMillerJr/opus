@@ -244,16 +244,18 @@ def batch_to_txt(loc, pattern, target):
     return
 
 #> converts numpy to txt for liliya
-def npy_to_txt(fileName, target):
+def npy_to_txt(fileName, target=''):
     
     #> opening file
     data = np.load(fileName, allow_pickle=True)
     
+    #> moving to target dir if requested
     if target == '':
         new_fileName = (str(fileName)[:-3] + 'txt')
     else:
         new_fileName = target + (str(fileName)[:-3] + 'txt').replace('\\', '/').split('/')[-1]
         
+    #> saving to txt
     np.savetxt(new_fileName, data, newline='\n')
     
     return
