@@ -7,11 +7,15 @@
 
 #> imports
 import numpy as np
+import pandas as pd
 
 #> plotting
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+
+#> larger folder glob
+from pathlib import Path
 
 #> classes
 import lensing
@@ -160,11 +164,6 @@ def kappaMultipoles(X, Y, delx, dely, pix_arc, images=None, outFile=False):
     gradxy, gradxx = np.gradient(delx * pix_arc * u.arc_rad)
     gradyy, gradyx = np.gradient(dely * pix_arc * u.arc_rad)
     kappa = 0.5 * (gradxx + gradyy)
-    
-    print(np.max(kappa))
-    print(np.min(kappa))
-    print(np.mean(kappa))
-    print(np.std(kappa))
     
     #> plotting!
     cs = ax.contour(X / pix_arc, Y / pix_arc, kappa, levels=kappa_multiples_levels, colors='k')
@@ -484,7 +483,6 @@ def plotPop(fileName, observables):
 """ #> PRIORS ========================
 ================================== """
 
-
 #> plots the distribution of priors
 def priors_z(df, **kwargs):
     
@@ -514,7 +512,6 @@ def priors_z(df, **kwargs):
         plt.savefig(fig_loc + outFile + '.png', dpi=dpi, bbox_inches='tight')
     
     return
-
 
 #> plots prior correlations
 def priors_correl(df, **kwargs):
@@ -615,9 +612,143 @@ def priors_correl(df, **kwargs):
     
     return
 
+""" #> BPROFILES =====================
+================================== """
+
+#> plots the distribution of parameters in bprofiles
+def bprof(bprofiles=None, csv_fileName='', 
+          bprof_fileName='', keys=[], shape='square',
+          outFile=None):
+    
+    #> imports
+    from modules import parse
+    
+    #> checking to ensure at least one thing is provided
+    mask = [(bprofiles is not None), (csv_fileName != ''), (bprof_fileName != '')]
+    if sum(mask) == 0:
+        error.phrase('Need to supply bprofiles, bprof_fileName, or csv_fileName')
+    
+    #> checking that multiple are not supplied
+    if sum(mask) > 1:
+        error.phrase('Too many supplied arguments. Only need to provide one')
+    
+    #> getting df if bprofiles is provided
+    file = None
+    if mask[0]: df = parse.bprof_to_df(bprofiles=bprofiles)
+    if mask[1]: df = pd.read_csv(csv_fileName); file=csv_fileName
+    if mask[2]: df = parse.bprof_to_df(fileName=bprof_fileName); file=csv_fileName
+    
+    #> df should be correct now
+    columns = df.columns.to_numpy()
+    numGals = len(df)
+    
+    #> parsing keys we don't care about
+    parseKey = ['add', 'slope', 'x0', 'y0', 
+                'mult3_theta', 'mult4_theta', 'name', '_m',
+                'rhoc', 'sigCrit', 'angDist', 'rho0', 'radius',
+                'hern_norm', 'hern_theta']
+    for key in parseKey:
+        mask = [key not in x for x in columns]
+        columns = np.array(columns[mask])
+    print(columns)
+    
+    #> determining how many params to plot
+    if len(keys) == 0: numKeys = len(columns); keys = columns
+    else: numKeys = len(keys)
+    
+    #> if shape is square
+    if shape == 'square':
+        
+        #> determining square size
+        r = int(np.sqrt(numKeys)) + 1
+        keys = np.hstack([keys, np.array([None] * (r**2 - numKeys) )])
+        array = keys.reshape(r, r)
+        
+        #> initializing figure
+        fig, axes = plt.subplots(r,r,figsize=(6*r, 6*r))
+        
+        #> plotting
+        for i, ax in enumerate(axes.flat):
+            
+            #> variable
+            key = keys[i]
+            if key is None: 
+                ax.axis('off')
+                continue
+            
+            #> initializing
+            ax.grid(ls=':', alpha=0.5)
+            ax.set_xlabel(key, fontsize=15, fontweight='bold')
+            
+            #> plotting
+            ax.hist(df[key].astype(float), density=True, bins=15)
+    
+    #> if shape will depend on the profiles
+    elif shape == 'prof':
+        
+        #> getting shape
+        misc, nfw, hern, mult, ex = [], [], [], [], []
+        arrays = [misc, nfw, hern, mult, ex]
+        for key in keys:
+            if 'nfw' in key: nfw.append(key); continue
+            if 'hern' in key: hern.append(key); continue
+            if 'mult' in key: mult.append(key); continue
+            if 'ex' in key: ex.append(key); continue
+            misc.append(key)
+        
+        #> determines shape
+        lengths = np.array([len(x) for x in arrays])
+        numRows = np.sum((lengths > 0))
+        numCols = max(lengths)
+        
+        #> master array
+        for i, array in enumerate(arrays):
+            arrays[i] = np.hstack((array, [None] * (numCols - lengths[i]) ))
+        arrays = np.array(arrays)
+        
+        #> initializing figure
+        fig, axes = plt.subplots(numRows,numCols,figsize=(6*numCols, 6*numRows))
+        
+        #> settin title
+        if file is not None:
+            file = str(file)
+            title = file.replace('\\', '/').split('/')[-1]
+            plt.suptitle(title, fontweight='bold', fontsize=20, y=0.9)
+        
+        #> plotting
+        for i, ax in enumerate(axes.flat):
+            
+            #> getting key
+            key = arrays.flatten()[i]
+            
+            if key is None: 
+                ax.axis('off')
+                continue
+            
+            #> initializing
+            ax.grid(ls=':', alpha=0.5)
+            ax.set_xlabel(key, fontsize=15, fontweight='bold')
+            
+            #> plotting
+            ax.hist(df[key].astype(float), density=True, bins=15)
+        
+        pass
+    
+
+    
+    #> saving and closing
+    if outFile is not None: 
+        plt.savefig(outFile + '.png', dpi=dpi, bbox_inches='tight')
+    
+    plt.show()
+    
+    return
+
+
 """ #> PNGS TO GIF ===================
 ================================== """
 
+#> converts a set of pngs to a gif
 def pngs_to_gif(loc, scale=1.0, colors=256, duration=100):
 
     #> imports
@@ -666,7 +797,22 @@ if __name__ == '__main__':
     import os
     print('> '+os.path.basename(__file__))
     
-    pngs_to_gif('./figures/dynamic_pix_arc/', scale=0.1)
+    
+    loc = '../opus_lmfi/data/260909_comp1/'
+    pattern = '*.csv'
+    target=loc
+    
+    
+    #> iterating through files 
+    files = Path(loc).rglob(pattern)
+    for file in files:
+        new_fileName = target + (str(file)[:-4]).replace('\\', '/').split('/')[-1]
+        bprof(csv_fileName=file, outFile=new_fileName, shape='prof')
+    
+    file = '../opus_lmfi/data/260909_comp1/26090914180800_pop01/26090914180800_pop01_bprofiles.npy'
+    #bprof(bprof_fileName=file,
+    #      outFile=file[:-4],
+    #      shape='prof')
     
     # end
 # thank

@@ -6,16 +6,21 @@
 ================================== """
 
 #> standard imports
+import glob
 import numpy as np
+import pandas as pd
 import scipy as sp
 
-import glob
+#> larger folder glob
+from pathlib import Path
 
-import ot
+#> wasserstein
+from ot import sliced_wasserstein_distance as swd
 
 #> modules
 from modules.units import u; u=u()
 import modules.error as error
+import modules.parse as parse
 
 #> data dir
 dataDir = './data/'
@@ -106,28 +111,72 @@ def gridComp(inFile1, inFile2, bins, observables):
     return np.e**(-p_val)
 
 
-#> wasserstein distance
-def wass(inFile1, inFile2, observables):
-    
-    #> getting parameter ranges
-    ranges = paramRanges(observables)
-    numParams = len(ranges)
+""" #> WASSERSTEIN ===================
+================================== """
+
+#> wasserstein distance for lensing observables
+def wassTheta(fileName1, fileName2, keys=None, method='ND', slices=100):
     
     #> collecting data
-    data1 = np.load(inFile1)[:100]
-    data2 = np.load(inFile2)[:100]
-    
-    print(data1.shape)
-    
-    #> 
-    n_projections = 1000 # Number of random projections (higher is generally better for accuracy)
+    data1 = np.load(fileName1)[:100]
+    data2 = np.load(fileName2)[:100]
 
     # Calculate the distance
-    sw_distance = ot.sliced_wasserstein_distance(data1,          # Source samples
-                                                 data2,          # Target samples
-                                                 n_projections=n_projections)
+    sw_distance = swd(data1, data2, n_projections=slices)
     
-    print(f"Sliced Wasserstein Distance: {sw_distance}")
+    print(f"> Sliced Wasserstein Distance: {sw_distance}")
+    
+    return sw_distance
+
+
+#> wasserstein distance for galaxy properties
+#> two methods: 1D = compares all dists in 1D, then adds Wass
+#               ND = sliced wassersten metric
+#> input methods: csv = bprofiles.csv
+#                 npy = bprofiles.npy
+#                 bprofiles = bprofiles array
+#                 df = dataframe
+#                 np = numpy array
+def wassXi(fileName1, fileName2, input='csv', keys=None, method='ND', slices=100):
+    
+    #> declarations
+    if keys == None:
+        
+        #> default keys
+        keys = ['zl', 'zs',                                                     # redshifts
+                'nfw_logmass', 'nfw_concentration', 'nfw_axisrat', 'nfw_theta', # nfw params
+                'hern_logmass', 'hern_effrad', 'hern_axisrat',                  # hern params
+                'mult1_norm', 'mult1_theta', 'mult3_norm', 'mult4_norm',        # multipole params
+                'ex_norm', 'ex_theta']                                          # ex params
+    
+    #> loading data
+    if input not in ['df', 'np']:
+        df1 = parse.load_bprofiles(fileName=fileName1, input=input)
+        df2 = parse.load_bprofiles(fileName=fileName2, input=input)
+    else:
+        if input == 'df': df1, df2 = fileName1, fileName2 # if already dataframes
+        if input == 'np': df1, df2 = pd.DataFrame(fileName1, columns=keys), pd.DataFrame(fileName2, columns=keys)
+    
+    #> separates based on methods
+    #> marginalized distributions (1D)
+    if method == '1D':
+        
+        #> iterates through keys
+        sw_dists = []
+        for key in keys: 
+            sw_dists.append( swd(df1[key], df2[key], n_projections=1) )
+        sw_dists = np.arrays(sw_dists)
+        
+    #> joint distributions (ND)
+    elif method == 'ND':
+        
+        
+        
+
+    #> calculates the SW distance
+    # sw_distance = swd(data1, data2, n_projections=slices)
+    
+    # print(f"> Sliced Wasserstein Distance: {sw_distance}")
     
     return sw_distance
 
@@ -142,31 +191,14 @@ if __name__ == '__main__':
     import os
     print('> '+os.path.basename(__file__))
     
-    #> getting all files in data
-    files = glob.glob('./data/*.npy')
-    files = [ x.replace("\\", "/") for x in files ]
+    #> getting all populations
+    loc = '../opus_lmfi/data/260909_comp1/'
+    pattern = '*.csv'
     
-    #> plotting quad population
-    observables = ['t23', 'dt23', 'd4/d1']
-    file1 = dataDir+'2602251720-obs'+'.npy'
-    # file2 = dataDir+'2602251720-obs'+'.npy'
-    file2 = dataDir+'2602251721-mod1'+'.npy'
-    file2 = dataDir+'2602251721-mod2'+'.npy'
-    file2 = dataDir+'2602251722-mod3'+'.npy'
-    file2 = dataDir+'2602251723-mod4'+'.npy'
-    # file2 = dataDir+'2602231352-mod5'+'.npy'
-    
-    observables = ['t23', 'dt23', 'd4/d1']
+    #> iterates through files
+    files = list(Path(loc).rglob(pattern))
     for i, file in enumerate(files):
-        p_val = gridComp(files[1], file, bins=10, observables=observables)
-        wass(files[1], file, observables)
-        print(file, p_val)
-        
-    #### IN THE OUTPUT OF THE NPY FILES, INCLUDE THE HEADERS OF THE OBSERVABLES
-    #### SO THAT THEY CAN BE SPECIFICALLY REQUESTED, PLUS THEN I KNOW WHAT
-    #### OBSERVABLES I USED! :)
-    #### OH AND MAKE AN OPTION TO SAVE THE PARAM DICTIONARY TO A SEPARATE FILE
-    #### OR MAYBE THAT IS WHAT CONTAINS THE OBSERVABLES...
+        sw = wassXi(files[0], files[i], input='csv')
     
     
     # end

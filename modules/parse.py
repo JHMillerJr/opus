@@ -12,6 +12,7 @@ import sys
 import glob
 import inspect
 import numpy as np
+import pandas as pd
 
 #> file imports
 import codecs
@@ -229,6 +230,88 @@ def toPickle(fileName, cucumber):
     print(f'> Created pickle @ {fileName}')
     return
 
+""" #> BPROFILES TO DF ===============
+================================== """
+
+#> loads bprofiles depending on input and output
+#> input options: csv, npy, bprofiles, df
+#> output options: bprofiles, df
+def load_bprofiles(fileName, input='csv'):
+    
+    #> loads csv
+    if input == 'csv': return pd.read_csv(fileName)
+    
+    #> loads npy
+    if input == 'npy': return np.load(fileName, allow_pickle=True)
+    
+    #> loads bprofiles
+    if input == 'bprofiles': return bprof_to_df(bprofiles=fileName, save=False)
+    
+    error.phrase(f'load_bprofiles() does not understand input={input}')
+    return
+
+#> summarizing bprofiles to bprofiles
+def bprof_to_df(bprofiles=None, fileName='', save=False, outFile='bprofiles_df.csv'):
+    
+    #> checking to ensure at least one thing is provided
+    if bprofiles is None and fileName == '':
+        error.phrase('Need to supply either bprofiles or its fileName!')
+    
+    #> loading if given file
+    if fileName != '': bprofiles = np.load(fileName, allow_pickle=True)
+    
+    #> declarations
+    df = pd.DataFrame()
+    
+    #> bprofiles should be defined by now
+    columns = []
+    for i, b in enumerate(bprofiles):
+        
+        #> declarations
+        dummy = []
+        
+        #> getting column names
+        for key in b.keys():
+            
+            #> if singular value
+            if isinstance(b[key], float): 
+                if i == 0: columns.append(key)
+                dummy.append(b[key])
+                continue
+            
+            #> iterating through dictionaries
+            for array in b[key]: # for each array inside prof
+                for sub_key in array.keys():
+                    
+                    #> chaning mult key
+                    if key in ['mult']: key_ = key + str(array['m'])
+                    else: key_ = key
+                    
+                    #> appending
+                    dummy.append(array[sub_key])
+                    if i == 0: columns.append(f'{key_}_{sub_key}')
+        columns = np.array(columns)
+        dummy = np.array(dummy)
+        
+        #> appending to dataframe
+        df.loc[i, columns] = dummy
+    
+    # print(df.to_string())
+    if save:
+        df.to_csv(outFile, index=False)
+        
+    return df
+
+#> batch convert to txt
+def batch(loc, pattern, target):
+    
+    #> iterating through files 
+    files = Path(loc).rglob(pattern)
+    for file in files:
+        new_fileName = target + (str(file)[:-4] + '_df.csv').replace('\\', '/').split('/')[-1]
+        bprof_to_df(fileName=file, outFile=new_fileName, save=True)
+    
+    return
 
 """ #> TO LLRW =======================
 ================================== """
@@ -273,8 +356,12 @@ if __name__ == '__main__':
     # fromDIRtoDFs(dirPath, verbose=True, keys=['images'])
     
     loc = '../opus_lmfi/data/260909_comp1/'
-    pattern = '*_obs*.npy'
-    batch_to_txt(loc, pattern, loc)
+    pattern = '*_bprofiles.npy'
+    # batch_to_txt(loc, pattern, loc)
+    
+    file = loc + '26090914180800_pop01/26090914180800_pop01_bprofiles.npy'
+    # bprof_to_df(fileName=file, save=True)
+    batch(loc, pattern, loc)
     
     #data, keys = fromNPY(file)
     #print(data['im_obs'][0])

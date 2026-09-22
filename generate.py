@@ -90,6 +90,7 @@ def getSaveDict(atleast_one_save=True, **kwargs):
                 'sources': kwargs.get('sources', True),
                 'lens': kwargs.get('lens', False), 
                 'bprofiles': kwargs.get('bprofiles', True),
+                'csv': kwargs.get('csv', True),
                 'paramRanges': kwargs.get('paramRanges', True)}
     
     #> making all false if wanted
@@ -417,7 +418,8 @@ def genPop(numGals, **kwargs):
                                sources=sources,           # source positions
                                lens=lens,                 # lens info (see above)
                                bprofiles=bprofiles,       # bprofiles (inclues pix_arc)
-                               paramRanges=paramRanges)   # param ranges
+                               paramRanges=paramRanges,   # param ranges
+                               csv=saveFlag['csv'])                   # converts bprofiles to csv
     
     #> plotting many lenses
     if any(plotFlag.values()):
@@ -684,36 +686,6 @@ def getMag(lens, pix_arc, images):
 ================================== """
 
 #> saves info to outfile
-def saveInfo_oneFile(outFile, **kwargs):
-    
-    #> unpacking kwargs
-    images    = kwargs.get('images', None)
-    im_obs    = kwargs.get('im_obs', None)
-    im_mags   = kwargs.get('im_mags', None)
-    sources   = kwargs.get('sources', None)
-    lens      = kwargs.get('lens', None)
-    bprofiles = kwargs.get('bprofiles', None)
-    
-    #> declaration
-    mainDict = {}
-    
-    #> saving data
-    if images    is not None and images.size!=0 :  mainDict['images'] = images
-    if im_obs    is not None and im_obs.size!=0 :  mainDict['im_obs'] = im_obs
-    if im_mags   is not None and im_mags.size!=0 : mainDict['im_mags'] = im_mags
-    if sources   is not None and sources.size!=0 : mainDict['sources'] = sources
-    if lens      is not None: mainDict['lens'] = lens
-    if bprofiles is not None: mainDict['bprofiles'] = bprofiles
-    
-    #> ensuring not empty, then saving
-    if mainDict: # not empty
-        np.save(outFile, mainDict)
-        print(f'> Saved info to {outFile}.npy')
-    
-    return
-
-
-#> saves info to outfile
 def saveInfo_multipleFiles(dirPath, fileName, suffix, **kwargs):
     
     #> globals
@@ -755,6 +727,7 @@ def saveInfo_multipleFiles(dirPath, fileName, suffix, **kwargs):
     lens      = kwargs.get('lens', None)
     bprofiles = kwargs.get('bprofiles', None)
     paramRanges = kwargs.get('paramRanges', None)
+    csv = kwargs.get('csv', None)
     
     #> saving data
     if images    is not None and images.size!=0 :  np.save(parent_dir + fileName[:-1] + '_images', images)
@@ -764,6 +737,7 @@ def saveInfo_multipleFiles(dirPath, fileName, suffix, **kwargs):
     if lens      is not None: np.save(parent_dir + fileName[:-1] + '_lens', lens)
     if bprofiles is not None: np.save(parent_dir + fileName[:-1] + '_bprofiles', bprofiles)
     if paramRanges is not None: np.save(parent_dir + fileName[:-1] + '_paramRanges', paramRanges)
+    if csv: parse.bprof_to_df(bprofiles, save=True, outFile=parent_dir + fileName[:-1]+'_df.csv')
 
     return
 
@@ -777,40 +751,6 @@ if __name__ == '__main__':
     #> name
     print('> '+os.path.basename(__file__),'\n')
     
-    #> declarations
-    printTime = False
-
-    #> lens declarations
-    zl = 0.5
-    zs = 1.0
-    factor = 1
-    nph = 50 * factor
-    pix_arc = 60 * factor
-    
-    #> observables
-    observables = ['t12', 't23', 't34', 'd2/d1', 'd3/d1' ,'d4/d1', 'dt23']
-    
-    #> parses command line arguments
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--mult', type=int, nargs='+', default=None, help='adds multipole (can be more than one, separate by space)')
-    parser.add_argument('--ex', action='store_true', help='adds external shear')
-    parser.add_argument('--suffix', type=str, default='', help='adds suffix to end of file name')
-    parser.add_argument('--folder', type=str, default='+unsorted', help='adds suffix to end of file name')
-    args, unknown = parser.parse_known_args()
-    args.args = unknown
-    # print(args)
-    
-    #> getting galaxy profiles
-    if args.mult is None: mult=[]
-    else: mult=args.mult
-    galProfs = galProfiles(mult=mult, ex=args.ex)
-    galProfs = galProfiles(nfw=True, hern=True, mult=[], ex=False)
-    
-    #> single galaxy
-    # sysConfig = (zl, zs), galProfs, nph, pix_arc
-    # singleGal(sysConfig) # options: plotDict(False), numSource_gal, source=(0.0, 0.0)
-    source=[(0,0)]
-    genPop(numGals=1, redshifts=(0.5, 1.0), verbose=True, suffix='', mags=False, source=source, mult=[], mu=[0,1], saveFlag=getSaveDict(False), plotFlag=getPlotDict())
     
 
     # end
