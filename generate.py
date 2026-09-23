@@ -11,6 +11,7 @@ import sys
 import time
 import random
 import numpy as np
+import pandas as pd
 from datetime import datetime
 
 #> terminal imports
@@ -381,6 +382,10 @@ def genPop(numGals, **kwargs):
     
     #> unpacking quad object
     images, im_obs, sources, im_mags = quadObject
+    
+    #> creating pandas dataframe for obs
+    #if observables is not None:
+    #    im_obs = pd.DataFrame(im_obs, columns=observables)
     
     #<&># object information
     #> quadObject = images, im_obs, sources, im_mags

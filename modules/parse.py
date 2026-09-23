@@ -302,6 +302,39 @@ def bprof_to_df(bprofiles=None, fileName='', save=False, outFile='bprofiles_df.c
         
     return df
 
+#> converts parameter keys into min/max arrays
+def keys_to_ranges(keys, ranges=None):
+    
+    #> imports
+    import params
+    
+    #> getting parameter ranges
+    if ranges is None: ranges = params.paramRanges()
+    
+    #> iterating through profiles
+    mins, maxs = {}, {}
+    for prof in ['nfw', 'hern', 'mult', 'ex']:
+        
+        for array in ranges[prof]:
+            
+            #> changing mult key
+            if prof == 'mult': prof_ = prof + str(array['m'])
+            else: prof_ = prof
+            
+            #> iterating through parameters
+            for key in array.keys():
+                
+                #> only parameters with ranges
+                if isinstance(array[key], dict) and 'min' in array[key]:
+                    mins[f'{prof_}_{key}'] = array[key]['min']
+                    maxs[f'{prof_}_{key}'] = array[key]['max']
+    
+    #> getting requested ranges
+    dmin = np.array([mins[key] for key in keys], dtype=float)
+    dmax = np.array([maxs[key] for key in keys], dtype=float)
+    
+    return dmin, dmax
+
 #> batch convert to txt
 def batch(loc, pattern, target):
     
