@@ -26,7 +26,7 @@ import modules.parse as parse
 dataDir = './data/'
 
 
-""" #> GRID COMP =====================
+""" #> STATIC GRID ===================
 ================================== """
 
 #> returns ranges for each requested obesrvable
@@ -43,7 +43,6 @@ def paramRanges(observables):
         ranges.append(rangesDict[obs])
     
     return ranges
-
 
 #> comparison of two quad populations based on square grid
 def gridComp(inFile1, inFile2, bins, observables):
@@ -109,6 +108,27 @@ def gridComp(inFile1, inFile2, bins, observables):
         p_val += ( abs(diff)**2 / fgrid2[i] )
     
     return np.e**(-p_val)
+
+
+""" #> EVOLVING RES GRID =============
+================================== """
+
+#> cut-off criteria
+#  true = continue to subdivide
+#  false = stop subdividing
+def densityCriteria(density):
+    
+    
+    return
+
+
+#> evolving grid
+def evolveGrid():
+    
+    #> 
+    
+    return
+
 
 
 """ #> WASSERSTEIN ===================
@@ -474,7 +494,7 @@ if __name__ == '__main__':
     #> getting all populations
     loc = '../opus_lmfi/data/260909_comp1/'
     df, obsIndx = popComp(loc, seed=seed, slices=100, numGals=100, numSource_gal=500,
-                          numObs=100, numMock=1000)
+                          numObs=100, numMock=4000)
     plotComp(df, obsIndx)
 
     

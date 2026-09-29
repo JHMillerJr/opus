@@ -54,6 +54,39 @@ plt.rcParams['axes.prop_cycle'] = plt.cycler(color=['blue', 'red', 'orange', 'ma
 # cycle_colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
 
 
+""" #> FORMATTING ====================
+================================== """
+
+#> makes a box
+def toBox(ax, margin=0.1):
+    
+    #> gets margins
+    xmin, xmax = ax.get_xlim()
+    ymin, ymax = ax.get_ylim()
+    
+    #> gets maximum
+    b = max(abs(xmin), xmax, abs(ymin), ymax) * (1+margin)
+    
+    #> sets lims
+    ax.set_xlim(-b, b)
+    ax.set_ylim(-b, b)
+    
+    return
+
+#> sets the tick spacing
+def ticks(ax, xnum=0.5, ynum=0.5, method='multiple'):
+    
+    #> imports
+    import matplotlib.ticker as ticker
+    
+    #> multiple locator
+    if method == 'multipole':
+        ax.xaxis.set_major_locator(ticker.MultipleLocator(xnum))
+        ax.yaxis.set_major_locator(ticker.MultipleLocator(ynum))
+    
+    return
+
+
 """ #> IMAGES ========================
 ================================== """
 
