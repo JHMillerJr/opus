@@ -89,22 +89,22 @@ def sample_priors(numGals, priorDict, nph, **kwargs):
     #> initializing dataframe
     #> dataframe
     names = ['zl', 'zs']
-    data = np.vstack([redshifts[:,0],    # zl
-                      redshifts[:,1]]).T # zs
+    data = np.vstack([redshifts[:,0],      # zl
+                      redshifts[:,1]]).T   # zs
     df = pd.DataFrame(data, columns=names)
         
     #> main sample function
     def sample(df):
     
         #> halo mass function
-        halom = halo_mass_fn(df['zl'],      # array of lens redshifts
-                             cosmo=cosmo,   # cosmology
-                             **kwargs)      # prior kwargs       
+        halom = halo_mass_fn(df['zl'],              # array of lens redshifts
+                             cosmo=cosmo,           # cosmology
+                             **kwargs)              # prior kwargs       
         
         #> halo mass-concentration relation
-        haloc = mass_c_vir_rel(M_virs=halom,      # array of virial halo masses
-                               zls=df['zl'],      # array of redshifts
-                               cosmo=cosmo)       # cosmology
+        haloc = mass_c_vir_rel(M_virs=halom,        # array of virial halo masses
+                               zls=df['zl'],        # array of redshifts
+                               cosmo=cosmo)         # cosmology
         
         #> stellar-to-halo mass relation
         mstar_nsig = np.random.normal(size=len(df))
@@ -140,7 +140,7 @@ def sample_priors(numGals, priorDict, nph, **kwargs):
     # print(time.time()-srt)
     
     #> redraw rejected galaxies
-    factor = 10
+    factor = 100
     tries = maxTries * factor
     while any(~df['sel']) and tries > 0:
         
@@ -222,7 +222,7 @@ def ranRedshifts(numGals, **kwargs):
     cov = np.diag(sigma) @ R @ np.diag(sigma) # converting correlation & std vectors to covariance matrix
     
     #> drawing samples
-    tmvn = TruncatedMVN(mu, cov, lb, ub)
+    tmvn = TruncatedMVN(mu, cov, lb, ub, seed=np.random.randint(2**31 - 1))
     samples = tmvn.sample(numGals)
     df_samples = pd.DataFrame(np.array(samples).T, columns=['zl', 'zs'])
     
@@ -482,10 +482,10 @@ def assign_redshifts(numGals, method='2D', **kwargs):
 def densityContrast(z, cosmo=u.cosmo):
     
     #> dimensionless friedman eq; 2023 Birrer Eq. 12
-    E = lambda z: ( cosmo['omega_m']*(1 + z)**3 + cosmo['omega_lam'] )**0.5
+    E = lambda z: ( cosmo['omega_m_0']*(1 + z)**3 + cosmo['omega_lam_0'] )**0.5
     
     #> omega_m(z); 1997 Bryan & Norman
-    omega_m_z = ( cosmo['omega_m'] * (1+z)**3 ) / E(z)**2
+    omega_m_z = ( cosmo['omega_m_0'] * (1+z)**3 ) / E(z)**2
     x = omega_m_z - 1
     
     #> density contrast; 1997 Bryan & Norman Eq. 6

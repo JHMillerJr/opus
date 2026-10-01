@@ -6,7 +6,7 @@
 ================================== """
 
 #> main function
-def potential(X, Y, batch_profiles):
+def potential(X, Y, batch_profiles, testing=False):
 
     #> imports
     import numpy as np
@@ -40,11 +40,11 @@ def potential(X, Y, batch_profiles):
     Ny, Nx = X.shape          # shape of lpot map
 
     #> changing grid dtype
-    X = X.astype(np.float32)
-    Y = Y.astype(np.float32)
+    X = X.astype(np.float64)
+    Y = Y.astype(np.float64)
 
     #> initializing lpot grid
-    lpot = np.zeros((B, Ny, Nx), dtype=np.float32)
+    lpot = np.zeros((B, Ny, Nx), dtype=np.float64)
 
     #> getting per galaxy parameters
     angDist = np.array([p['angDist'] for p in batch_profiles], dtype=np.float32)
@@ -82,14 +82,15 @@ def potential(X, Y, batch_profiles):
         
         #> translating, rotating, and converting grid
         denom = ( radius / np.sqrt(axisrat) / angDist)
-        Xr = (( X[None,:,:]*ct + Y[None,:,:]*st) / pix_arc - x0) / arc_rad / denom  # pix --> rad
-        Yr = ((-X[None,:,:]*st + Y[None,:,:]*ct) / pix_arc - y0) / arc_rad / denom  # pix --> rad
+        Xs = X[None,:,:]/pix_arc - x0;  Ys = Y[None,:,:]/pix_arc - y0     # arcsec, shifted first
+        Xr = ( Xs*ct + Ys*st) / arc_rad / denom
+        Yr = (-Xs*st + Ys*ct) / arc_rad / denom
         
         #> (more) declarations
         Xr2 = Xr*Xr
 
         #> main nfw lp array
-        lp = np.zeros_like(Xr, dtype=np.float32)
+        lp = np.zeros_like(Xr, dtype=np.float64)
         
         #> iterating thru each nfw coefficent
         for Ai, Si in NFW_COEFFS:
@@ -106,13 +107,12 @@ def potential(X, Y, batch_profiles):
 
             lp += Ai * (psi)
 
-        #> sclaing lensing potential
+        #> scaling lensing potential
         r0_prime2 = (radius * radius) / axisrat
-        scale = r0_prime2 * (radius*rho0) / sigCrit / angDist # do i need to divide by angDist here??
+        scale = r0_prime2 * (radius*rho0) / sigCrit / (angDist*angDist)
 
-        #> adding to main lpot object (do i need to rotate back for lpot??)
+        #> adding to main lpot object
         lpot += lp * scale
-        # lpot += gx*ct - gy*st
 
 
     ################
@@ -140,11 +140,15 @@ def potential(X, Y, batch_profiles):
         
         #> translating, rotating, and converting grid
         denom = ( radius / np.sqrt(axisrat) / angDist)
-        Xr = (( X[None,:,:]*ct + Y[None,:,:]*st) / pix_arc - x0) / arc_rad / denom  # pix --> rad
-        Yr = ((-X[None,:,:]*st + Y[None,:,:]*ct) / pix_arc - y0) / arc_rad / denom  # pix --> rad
+        Xs = X[None,:,:]/pix_arc - x0;  Ys = Y[None,:,:]/pix_arc - y0     # arcsec, shifted first
+        Xr = ( Xs*ct + Ys*st) / arc_rad / denom
+        Yr = (-Xs*st + Ys*ct) / arc_rad / denom
+        
+        #> (more) declarations
+        Xr2 = Xr*Xr
 
         #> main hern lp array
-        lp = np.zeros_like(Xr, dtype=np.float32)
+        lp = np.zeros_like(Xr, dtype=np.float64)
 
         #> iterating thru each hern coefficient
         for Ai, Si in HERN_COEFFS:
@@ -163,22 +167,29 @@ def potential(X, Y, batch_profiles):
 
         #> sclaing lensing potential
         r0_prime2 = (radius * radius) / axisrat
-        scale = r0_prime2 * (radius*norm) / sigCrit / angDist
+        scale = r0_prime2 * (radius*norm) / sigCrit / (angDist*angDist)
 
         #> adding to main lpot object
         lpot += lp * scale
 
-    #> MULT - - - - - - -
+
+    ################
+    #>>># MULT #<<<#
+    ################
+    
+    #> getting max number of multipoles
     max_mult = max(len(p.get('mult', [])) for p in batch_profiles) # gets max number of mult profiles for all galaxies
+    
+    #> iterating thru each multipole
     for idx in range(max_mult):
         
         #> unpacking profile params
-        x0 =    np.array( [ p.get('mult',[{}]*max_mult)[idx].get('x0',0)    for p in batch_profiles], dtype=np.float32)[:,None,None]
-        y0 =    np.array( [ p.get('mult',[{}]*max_mult)[idx].get('y0',0)    for p in batch_profiles], dtype=np.float32)[:,None,None]
-        m =     np.array( [ p.get('mult',[{}]*max_mult)[idx].get('m',1)     for p in batch_profiles], dtype=np.float32)[:,None,None]
-        norm =  np.array( [ p.get('mult',[{}]*max_mult)[idx].get('norm',0)  for p in batch_profiles], dtype=np.float32)[:,None,None]
-        slope = np.array( [ p.get('mult',[{}]*max_mult)[idx].get('slope',2) for p in batch_profiles], dtype=np.float32)[:,None,None]
-        pa =    np.array( [ p.get('mult',[{}]*max_mult)[idx].get('theta',0)*np.pi/180 for p in batch_profiles], dtype=np.float32)[:,None,None]
+        x0    = np.array( [ p.get('mult',[{}]*max_mult )[idx].get('x0', 0)    for p in batch_profiles], dtype=np.float32)[:,None,None]
+        y0    = np.array( [ p.get('mult',[{}]*max_mult )[idx].get('y0', 0)    for p in batch_profiles], dtype=np.float32)[:,None,None]
+        m     = np.array( [ p.get('mult',[{}]*max_mult )[idx].get('m', 1)     for p in batch_profiles], dtype=np.float32)[:,None,None]
+        norm  = np.array( [ p.get('mult',[{}]*max_mult )[idx].get('norm', 0)  for p in batch_profiles], dtype=np.float32)[:,None,None]
+        slope = np.array( [ p.get('mult',[{}]*max_mult )[idx].get('slope', 2) for p in batch_profiles], dtype=np.float32)[:,None,None]
+        pa    = np.array( [ p.get('mult',[{}]*max_mult )[idx].get('theta', 0)*np.pi/180 for p in batch_profiles], dtype=np.float32)[:,None,None]
         
         #> converting and translating grid
         Xr = (X[None,:,:] / pix_arc) - x0 # pix --> arc
@@ -189,20 +200,24 @@ def potential(X, Y, batch_profiles):
         theta_grid = np.arctan2(Yr, Xr)
         
         #> other calculating shit
-        phi = m*(theta_grid - pa)
-        C = -norm/m * r**(slope-2)
+        C = -norm/m * r**(slope)
 
         #> calculating deflection angles + adding to total
-        gradx += C * (Xr*slope*np.cos(phi) + Yr*m*np.sin(phi)) / arc_rad
-        grady += C * (Yr*slope*np.cos(phi) - Xr*m*np.sin(phi)) / arc_rad
+        lpot += C * np.cos(m*(theta_grid - pa)) / arc_rad**2
 
 
-    #> EX - - - - - - -
+    ##############
+    #>>># EX #<<<#
+    ##############
+    
+    #> getting max number of external shears
     max_ex = max(len(p.get('ex', [])) for p in batch_profiles) # gets max number of ex profiles for all galaxies
+    
+    #> iterating thru each external shears
     for idx in range(max_ex):
         
         #> unpacking profile parameters
-        norm = np.array([p.get('ex',[{}]*max_ex)[idx].get('norm',0) for p in batch_profiles], dtype=np.float32)[:,None,None]
+        norm    = np.array([p.get('ex',[{}]*max_ex)[idx].get('norm',0) for p in batch_profiles], dtype=np.float32)[:,None,None]
         theta_g = np.array([p.get('ex',[{}]*max_ex)[idx].get('theta',0)*np.pi/180 for p in batch_profiles], dtype=np.float32)[:,None,None]
 
         #> converting grid
@@ -210,15 +225,16 @@ def potential(X, Y, batch_profiles):
         Yr = Y[None,:,:] / pix_arc / arc_rad # pix --> rad
         
         #> calculating angle shit
+        r = np.sqrt(Xr**2 + Yr**2)
         dphi = 2*(np.arctan2(Yr,Xr)-theta_g)
         c2 = np.cos(dphi)
-        s2 = np.sin(dphi)
         
         #> calculating deflection angles + adding to total
-        gradx += -norm*(Xr*c2 + Yr*s2)
-        grady += -norm*(Yr*c2 - Xr*s2)
+        lpot += -norm/2 * r**2 * c2
             
-    return lpot, scaled_lpot
+    #> how to return lpot
+    if testing: return lpot * pix_arc * arc_rad
+    else: return lpot
 
 
 """ #> MAIN ==========================
@@ -244,9 +260,9 @@ if __name__ == '__main__':
     X, Y = generate.grid(nph=50)
     
     #> preping galaxy params
-    nfw = True
+    nfw = False
     hern = False
-    mult = []
+    mult = [4]
     ex = False
     galProf = generate.galProfiles(nfw=nfw, hern=hern, mult=mult, ex=ex)
     
@@ -255,7 +271,7 @@ if __name__ == '__main__':
     batch_profiles = params.bprofiles(numGals, ranges=paramRanges)
     
     #> running
-    lpot, scaled_lpot = potential(X, Y, batch_profiles)
+    lpot = potential(X, Y, batch_profiles, testing=True)
     
     #> calculating first derivatives
     lgrady, lgradx = np.gradient(lpot, axis=(1,2))
@@ -263,8 +279,7 @@ if __name__ == '__main__':
     #> getting the deflection angles
     gradx, grady, lamt = deflection.deflection(X, Y, batch_profiles)
     
-    print(lgradx[0])
-    print(gradx[0])
+    print(lgradx[0]-gradx[0])
     
     # end
 # thank

@@ -130,77 +130,30 @@ def pfimsFn(x, y, gradx, grady, lamt, pix_arc, nph, observables, profiles):
     
     else: return []
 
-
-
-""" #> FINDING IMAGES CPU ============
+""" #> FERMAT POTENTIAL ==============
 ================================== """
 
-#> finding contours
-def contourFinding(data):
-    return marching_squares(data, 0.0, interpolation="LINEAR", resolve_ambiguous=True)
-
-def fims(X, Y, gradx, grady, xs, ys, nph, pix_arc):
+#> returns images in arrival order + their fermat potentials
+def fermat(images, lpot, xs, ys, pix_arc, nph):
     
-    #> pix --> radians
-    X /= (pix_arc * u.arc_rad)
-    Y /= (pix_arc * u.arc_rad)
+    #> declarations
+    wrange = np.arange(-nph, nph, 1, dtype=float) / pix_arc # arcsec
     
-    #> grid
-    dx = X-gradx-xs
-    dy = Y-grady-ys
+    #> interpolating lensing potential
+    fpsi = spline(wrange, wrange, lpot.T) # rad^2
     
-    #np.save('deltx', dx)
-    #np.save('delty', dy)
+    #> converting image positions
+    th_x = images[:,0] / u.arc_rad # arcsec --> rad
+    th_y = images[:,1] / u.arc_rad # arcsec --> rad
     
-    vx, lx = contourFinding(dx)
-    vy, ly = contourFinding(dy)
+    #> fermat potential at each image
+    psi = fpsi.ev(images[:,0], images[:,1])                  # rad^2
+    tau = 0.5 * ( (th_x-xs)**2 + (th_y-ys)**2 ) - psi        # rad^2
     
-    bpts = vx[lx]
-    rpts = vy[ly]
+    #> ordering by arrival (1st arrival = min tau)
+    order = np.argsort(tau)
     
-    rpts = rpts[:,:,::-1]
-    bpts = bpts[:,:,::-1]
-    
-    # ensure proper shape (DO NOT destroy geometry)
-    rpts = np.asarray(rpts)
-    bpts = np.asarray(bpts)
-        
-    xims, yims = [], []
-    
-    for vx in rpts:
-        polyx = geo.LineString(vx)
-    
-        for vy in bpts:
-            polyy = geo.LineString(vy)
-    
-            if polyx.intersects(polyy):
-                try:
-                    intersection = polyx.intersection(polyy)
-    
-                    if isinstance(intersection, geo.Point):
-                        xims.append(intersection.x)
-                        yims.append(intersection.y)
-    
-                    elif hasattr(intersection, "geoms"):
-                        for g in intersection.geoms:
-                            xims.append(float(g.x))
-                            yims.append(float(g.y))
-    
-                except RuntimeWarning:
-                    continue
-                
-    #> converting to dict
-    xims = [ (x-nph)/pix_arc for x in xims ]
-    yims = [ (y-nph)/pix_arc for y in yims ]
-    images = np.column_stack((xims, yims))
-    
-    #> orders based on inverse distance to center + lensing theory
-    if images.shape !=  (0,2):
-        images = arrivalOrder(images, x0=0, y0=0)
-        
-    print(images)
-        
-    return np.array(images)
+    return images[order], tau[order] # arcsec, rad^2
 
 
 """ #> FINDING IMAGES ================
@@ -575,7 +528,7 @@ def magnification(gridx, gridy, gradx, grady, pix_arc, images):
             error.highlight(f'[continuing] Magnification parities are not correct! {im_mags}')
             pass
         else:
-            error.phrase(f'Magnification parities are not correct! {im_mags}')
+            error.highlight(f'Magnification parities are not correct! {im_mags}')
         
     return im_mags
 
@@ -644,7 +597,8 @@ def ranSources2(source_apexes, snum=1):
     gs = gpd.GeoSeries([poly])
     
     #> sampling to find points
-    sampled_sources = gs.sample_points(size=snum, method='uniform')
+    sampled_sources = gs.sample_points(size=snum, method='uniform', rng=np.random.randint(2**31 - 1))
+    x = np.random.uniform()
     
     #> get singular point (will be an issue if requesting multiple)
     points_list = list(sampled_sources[0].coords)

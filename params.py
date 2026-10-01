@@ -8,12 +8,10 @@
 import os
 import time
 import numpy as np
-import scipy as sp
 from copy import deepcopy
 
 #> modules
 import cosmology
-import modules.error as error
 import modules.parse as parse
 from modules.units import u; u = u()
 
@@ -74,7 +72,7 @@ def paramRanges():
                        'add': True}],
               'ex': [# ex shear
                     {'norm':  {'init': 1e-2, 'min': 0.0, 'max':0.03, 'fit': False},      # normalization []
-                     'theta': {'init': 15.0,  'min':-180, 'max': 180, 'fit': False},      # position angle [deg]
+                     'theta': {'init': 0.0,  'min':-180, 'max': 180, 'fit': False},      # position angle [deg]
                      'add': True}],
     }
     
@@ -299,9 +297,17 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
         #> adding calculated params
         #> nfw: logmass, rhoc(z), c --> radius; rhoc(z), c --> rho0
         for prof in ranges.get('nfw', []):
+            
+            #> getting density contrast if priors are used
+            mdef = kwargs.get('hmf_mdef', 'vir')
+            if (priorDict.get('hmf') or priorDict.get('cmr')) and mdef == 'vir':
+                delta = priors.densityContrast(ranges['zl'], cosmo=cosmo)
+            else:
+                delta = 200.
+            
             c = prof['concentration']
-            prof['radius'] = (1/c) * ((3. * 10**prof['logmass']) / (800. * 3.1415926536 * ranges['rhoc']))**(1./3.)
-            prof['rho0'] = 4 * (200./3.) * (c**3.) / (np.log(1+c) - (c/(1+c))) * ranges['rhoc']
+            prof['radius'] = (1/c) * ((3. * 10**prof['logmass']) / (delta * 4 * 3.1415926536 * ranges['rhoc']))**(1./3.)
+            prof['rho0'] = 4 * (delta/3.) * (c**3.) / (np.log(1+c) - (c/(1+c))) * ranges['rhoc']
         
         #> hern: Re --> r0; logmass, r0 --> normalization
         for prof in ranges.get('hern', []):

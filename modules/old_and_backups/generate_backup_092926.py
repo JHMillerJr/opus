@@ -11,7 +11,11 @@ import sys
 import time
 import random
 import numpy as np
+import pandas as pd
 from datetime import datetime
+
+#> terminal imports
+import argparse
 
 #> declarations
 dataDir = './data/'
@@ -25,6 +29,28 @@ import modules.geometry as geometry
 import modules.error as error
 import modules.parse as parse
 
+#> kwargs hierarchy
+#
+# genPop
+# ├─ output: folder, suffix, saveFlag, plotFlag, verbose, timeFlag
+# ├─ grid: scale_factor, pix_arc, nph
+# ├─ genGalPop
+# │  ├─ gpu
+# │  └─ bprofiles
+# │     ├─ mu, cov, lb, ub, uniform
+# │     └─ sample_priors
+# │        ├─ HMF: log10Mmin, log10Mmax, mdef, ngrid
+# │        ├─ redshift: z_func, z_method, obsFile
+# │        └─ MSR: msr_method
+# └─ genQuadPop
+#    ├─ source
+#    ├─ jims
+#    ├─ mags
+#    └─ observables
+
+# .get(...) = fn uses the parameter
+# **kwargs  = fn forwards parameters
+# kwargs | {...} = fn edits/overrides parameters downstream
 
 """ #> DEFAULTS ======================
 ================================== """
@@ -364,19 +390,18 @@ def genPop(numGals, **kwargs):
     if timeFlag: print(f'> Generating quads took {time.time()-srt:.2f} s')
     
     #> unpacking quad object
-    images, im_obs, sources, im_mags, delays = quadObject
+    images, im_obs, sources, im_mags = quadObject
     
     #> creating pandas dataframe for obs
     #if observables is not None:
     #    im_obs = pd.DataFrame(im_obs, columns=observables)
     
     #<&># object information
-    #> quadObject = images, im_obs, sources, im_mags, delays
+    #> quadObject = images, im_obs, sources, im_mags
     #> images  = (nph*2, nph*2)          [np.ndarray]
     #> im_obs  = (nph*2, nph*2)          [np.ndarray]
     #> sources = (numGals, nph*2, nph*2) [np.ndarray]
     #> im_mags = (numGals, nph*2, nph*2) [np.ndarray]
-    #> delays  = (numGals*numSource_gal, jims) [np.ndarray]; days, lpot only
     
     #> saving data
     if any(saveFlag.values()):
@@ -394,7 +419,6 @@ def genPop(numGals, **kwargs):
         if not saveFlag['images']: images = None
         if not saveFlag['im_obs']: im_obs = None
         if not saveFlag['im_mags']: im_mags = None
-        if not saveFlag['delays']: delays = None
         if not saveFlag['sources']: sources = None
         if not saveFlag['bprofiles']: bprofiles = None
         if not saveFlag['paramRanges']: paramRanges = None
@@ -405,7 +429,6 @@ def genPop(numGals, **kwargs):
                                images=images,             # image positions
                                im_obs=im_obs,             # image observables
                                im_mags=im_mags,           # image magnifications
-                               delays=delays,             # time delays (days)
                                sources=sources,           # source positions
                                lens=lens,                 # lens info (see above)
                                bprofiles=bprofiles,       # bprofiles (inclues pix_arc)
@@ -419,30 +442,15 @@ def genPop(numGals, **kwargs):
         maxPlot = 20
         
         #> unpacking info
-        if method == 'deflect':
-            xgrid, ygrid = lenses[:2]
-            all_delx, all_dely, all_lamt = lenses[2:]
-        elif method == 'lpot':
-            xgrid, ygrid = lenses[:2]
-            all_lpot = lenses[2]
-            
+        xgrid, ygrid = lenses[:2]
+        all_delx, all_dely, all_lamt = lenses[2:]
         
         #> plotting!
-        for i, _ in zip(range(numGals), range(maxPlot)):
+        for i, delx, dely, lamt, bprof, _ in zip(range(numGals), all_delx, all_dely, all_lamt, bprofiles, range(maxPlot)):
             
             #> getting images
             ims = np.array([images[i*numSource_gal]])
-            pix_arc = bprofiles[i]['pix_arc']
-            
-            #> parsing params depending on the method
-            if method == 'deflect':
-                delx = all_delx[i]
-                dely = all_dely[i]
-            elif method == 'lpot':
-                lpot = all_lpot[i]
-                dely, delx = np.gradient(lpot, axis=(0, 1), edge_order=2)
-                delx *= pix_arc * u.arc_rad                                  # per pixel -> rad
-                dely *= pix_arc * u.arc_rad
+            pix_arc = bprof['pix_arc']
             
             #> kappa
             if plotFlag['kappa']:
@@ -528,17 +536,11 @@ def genGalPop(numGals, **kwargs):
     else: error.phrase(f'Method={method} not understood. Please use lpot or deflect')
     return 
 
-
 #> generates a population of quads
 def genQuadPop(lenses, bprofiles, **kwargs):
     
     #> imports
     import lensing
-    
-    #> setting random seed
-    seed = kwargs.get('seed', None)
-    np.random.seed(seed)
-    random.seed(seed)
     
     #> method of lensing
     method = kwargs.get('method', 'deflect')
@@ -553,7 +555,6 @@ def genQuadPop(lenses, bprofiles, **kwargs):
     observables = kwargs.get('observables', None)
     mags = kwargs.get('mags', False)
     source = kwargs.get('source', kwargs.get('sources', None))
-    resolution = kwargs.get('resolution', None)
 
     #> if wanting observables w/o specifiying jims
     quad_observables = ['t12', 't23', 't34', 'd2/d1', 'd3/d1', 'd4/d1', 'dt23']
@@ -573,7 +574,7 @@ def genQuadPop(lenses, bprofiles, **kwargs):
         all_delx, all_dely, all_lamt = lenses[2:]
         numGals = len(all_delx)
     elif method == 'lpot':
-        all_lpot = lenses[2]            # (numGals, nph*2, nph*2) [rad^2]
+        all_lpot = lenses[:2]
         numGals = len(all_lpot)
     else: error.phrase(f'Method={method} not lpot or deflect')
     
@@ -609,7 +610,7 @@ def genQuadPop(lenses, bprofiles, **kwargs):
             print(lensing.ranSources2(source_apexes))
             plot.ccurves(xgrid, ygrid, delx, dely, pix_arc)
             plot.causticBox(xgrid, ygrid, delx, dely, pix_arc, source_apexes)
-                    
+        
         #> collecting all requested images
         for i in range(numSource_gal):
             
@@ -649,42 +650,27 @@ def genQuadPop(lenses, bprofiles, **kwargs):
                 xs /= u.arc_rad
                 ys /= u.arc_rad
             
-                #> lensing! (same for both methods)
-                ims = lensing.lfims(xgrid / pix_arc / u.arc_rad,  # radians
-                                    ygrid / pix_arc / u.arc_rad,  # radians
-                                    delx, dely,                   # radians
-                                    xs, ys,                       # radians 
-                                    pix_arc, nph, 
-                                    ordered=(method=='deflect'))  # geometric order only if deflect
+                #> lensing!
+                if method == 'deflect':
+                    ims = lensing.lfims(xgrid / pix_arc / u.arc_rad, # radians
+                                        ygrid / pix_arc / u.arc_rad, # radians
+                                        delx, dely,                  # radians
+                                        xs, ys,                      # radians 
+                                        pix_arc, nph, ordered=True)
+                elif method == 'lpot':
+                    ims = lensing.fermat(xgrid / pix_arc / u.arc_rad, # radians
+                                         ygrid / pix_arc / u.arc_rad, # radians
+                                         lpot,                        #
+                                         xs, ys,                      # radians
+                                         pix_arc, np, ordered=True)
                 
                 #> adjusting tries
                 numTries-=1
-                
-                #> seeing if resolved (needs at least 2 images to compare)
-                if resolution is not None and len(ims) > 1:
-                    resolved = lensing.resolved(images=ims, resolution=resolution)
-                    if not resolved:
-                        ims = np.empty((0,2)) # no images [arcsec]
                 
                 #> if there is no requested number of jims or requesting specific source
                 if requested_jims is None or source is not None: 
                     # print('changing flag')
                     flag = False
-            
-            #> if requested jims not found, filling w/ nans (keeps arrays aligned w/ supplied sources)
-            if requested_jims is not None and len(ims) != requested_jims:
-                error.highlight(f'Source {i} of galaxy {numGal} did not give {requested_jims} (resolved) images, gave {len(ims)} instead; filling w/ nans')
-                images.append(np.full((requested_jims, 2), np.nan))                   # arcsec
-                sources.append([xs * u.arc_rad, ys * u.arc_rad])                      # arcsec
-                if method == 'lpot': delays.append(np.full(requested_jims, np.nan))   # days
-                if observables is not None: im_obs.append(np.full(len(observables), np.nan))
-                if mags: im_mags.append(np.full(requested_jims, np.nan))
-                continue
-            
-            #> ordering by fermat potential + time delays (lpot only)
-            if method == 'lpot' and len(ims) > 0:
-                ims, tau = lensing.fermat(ims, lpot, xs, ys, pix_arc, nph) # arcsec, rad^2
-                delays.append(getDelays(tau, bprofiles[numGal]))           # days
                     
             #> if wanting lensing observables
             if observables is not None and requested_jims == 5:
@@ -701,7 +687,11 @@ def genQuadPop(lenses, bprofiles, **kwargs):
             #> adding images
             images.append(ims)
             sources.append([xs * u.arc_rad, ys * u.arc_rad])
-
+            
+            #> if could not find the number requested
+            if numTries == 0:
+                error.highlight(f'Source {i} could not find {requested_jims} images! Last source tried = ({xs},{ys})')
+    
     #> creating space in prints
     if verbose: print()
     
@@ -712,7 +702,146 @@ def genQuadPop(lenses, bprofiles, **kwargs):
     im_mags = np.array(im_mags, dtype=object)
     delays = np.array(delays, dtype=object)
 
-    return images, im_obs, sources, im_mags, delays
+    return images, im_obs, sources, im_mags
+
+
+#> generates a population of quads
+def genQuadPop_old(lenses, bprofiles, **kwargs):
+    
+    #> imports
+    import lensing
+    
+    #> if wanting print statements
+    verbose = kwargs.get('verbose', False)
+    warnings = kwargs.get('warnings', True)
+    
+    #> images + source declarations
+    requested_jims = kwargs.get('jims', None)
+    numSource_gal = kwargs.get('numSource_gal', 1)
+    observables = kwargs.get('observables', None)
+    mags = kwargs.get('mags', False)
+    source = kwargs.get('source', kwargs.get('sources', None))
+
+    #> if wanting observables w/o specifiying jims
+    quad_observables = ['t12', 't23', 't34', 'd2/d1', 'd3/d1', 'd4/d1', 'dt23']
+    if observables is not None and requested_jims is None:
+        if any(x in observables for x in quad_observables):
+            error.highlight('Requesting quad observables w/o setting jims=5!')
+            error.highlight('Setting jims=5!')
+            requested_jims = 5
+        
+    #> unpacking
+    xgrid, ygrid = lenses[:2]
+    nph = int(len(xgrid)/2)
+    
+    #> iterating through each lens
+    images, im_obs, im_mags, sources = [], [], [], []
+    all_delx, all_dely, all_lamt = lenses[2:]
+    numGals = len(all_delx)
+    
+    #> iterating thru each galaxy
+    for numGal, delx, dely, lamt in zip(range(numGals), all_delx, all_dely, all_lamt):
+        
+        #> print statement
+        if verbose: print(f'> Lensing {numSource_gal} source(s) for galaxy {numGal+1}!')
+        
+        #> getting pix_arc
+        pix_arc = bprofiles[numGal]['pix_arc']
+        
+        #> getting caustic / source positions
+        source_apexes = lensing.caustic(xgrid, ygrid, delx, dely, pix_arc, lamt, warnings=warnings)
+        
+        if len(source_apexes) == 0:
+            print(numGal)
+            print(source_apexes)
+            print(lensing.ranSources2(source_apexes))
+            plot.ccurves(xgrid, ygrid, delx, dely, pix_arc)
+            plot.causticBox(xgrid, ygrid, delx, dely, pix_arc, source_apexes)
+        
+        #> collecting all requested images
+        for i in range(numSource_gal):
+            
+            #> enforcing requested num of jims
+            ims, numTries, flag = [], maxTries, True
+            while (len(ims) != requested_jims) and (numTries > 0) and flag:
+                
+                #> getting source positions
+                if source is None: #> getting random source
+                
+                    #> random source within caustic
+                    if requested_jims == 5:
+                        xs, ys = lensing.ranSources2(source_apexes)[0]
+                    else:
+                        #> random source within window
+                        xs, ys = random.uniform(-nph, nph), random.uniform(-nph, nph)
+                        
+                else: # if source positions are provided
+                    
+                    #> converting just in case
+                    if isinstance(source[0], float) or isinstance(source[0], int): source =[source]
+                    source = np.array(source)
+                    
+                    #> checking for errors
+                    if (len(source) != numSource_gal) and (len(source) != 1) and (len(source) != numSource_gal*numGals):
+                        error.phrase(f'Incorrect # of sources: #s={len(source)}, #gal={numGals}, #s_gal={numSource_gal}')
+                        
+                    #> checking to see how to unpacking sources
+                    if len(source) == 1:                       # only one source given
+                        xs, ys = source[0]
+                    elif len(source) == numSource_gal:         # one set of matching sources per each galaxy
+                        xs, ys = source[i]
+                    elif len(source) == numSource_gal*numGals: # one source per source per galaxy
+                        xs, ys = source[(numGal*numSource_gal)+i]
+                
+                #> converting units
+                xs /= u.arc_rad
+                ys /= u.arc_rad
+            
+                #> lensing!
+                ims = lensing.lfims(xgrid / pix_arc / u.arc_rad, # radians
+                                    ygrid / pix_arc / u.arc_rad, # radians
+                                    delx, dely,                  # radians
+                                    xs, ys,                      # radians 
+                                    pix_arc, nph, ordered=True)
+                
+                #> adjusting tries
+                numTries-=1
+                
+                #> if there is no requested number of jims or requesting specific source
+                if requested_jims is None or source is not None: 
+                    # print('changing flag')
+                    flag = False
+                    
+            #> if wanting lensing observables
+            if observables is not None and requested_jims == 5:
+                if len(ims) != 5: # if NOT QUAD! UH OH, STINKY
+                    print(ims, numTries, flag)
+                    plot.ccurves(xgrid, ygrid, delx, dely, pix_arc)
+                    plot.causticBox(xgrid, ygrid, delx, dely, pix_arc, source_apexes, xs=xs, ys=ys)
+                obs = geometry.lensObs((0, 0), ims, observables)
+                im_obs.append(obs)
+             
+            #> if wanting magnifications
+            if mags: im_mags.append(getMag((xgrid, ygrid, delx, dely), pix_arc, ims))
+            
+            #> adding images
+            images.append(ims)
+            sources.append([xs * u.arc_rad, ys * u.arc_rad])
+            
+            #> if could not find the number requested
+            if numTries == 0:
+                error.highlight(f'Source {i} could not find {requested_jims} images! Last source tried = ({xs},{ys})')
+    
+    #> creating space in prints
+    if verbose: print()
+    
+    #> to numpy
+    images = np.array(images, dtype=object)
+    sources = np.array(sources, dtype=float).reshape(numGals*numSource_gal, 2)
+    im_obs = np.array(im_obs, dtype=object)
+    im_mags = np.array(im_mags, dtype=object)
+
+    return images, im_obs, sources, im_mags
 
 
 """ #> MAGNIFICATION =================
@@ -741,26 +870,6 @@ def getMags(lenses, bprofiles, images, **kwargs):
 def getMag(lens, pix_arc, images):
     import lensing
     return lensing.magnification(*lens, pix_arc, images)
-
-
-""" #> TIME DELAYS ===================
-================================== """
-
-#> returns the time delays relative to the first arriving image
-def getDelays(tau, bprof):
-    
-    #> declarations
-    zl      = bprof['zl']      # lens redshift
-    angDist = bprof['angDist'] # kpc
-    sigCrit = bprof['sigCrit'] # solMass/kpc^2
-    
-    #> time-delay distance; D_dt = (1+zl) Dd Ds/Dds = (1+zl) 4 pi G Dd^2 sigCrit / c^2
-    D_dt = (1+zl) * 4*np.pi*u.G_kpc_solMass * angDist**2 * sigCrit / u.c_kpc**2 # kpc
-    
-    #> time delays
-    dt = D_dt / u.c_kpc * (tau - tau[0]) # s
-    
-    return dt / 86400 # days
 
 
 """ #> SAVING ========================
@@ -804,7 +913,6 @@ def saveInfo_multipleFiles(dirPath, fileName, suffix, **kwargs):
     images    = kwargs.get('images', None)
     im_obs    = kwargs.get('im_obs', None)
     im_mags   = kwargs.get('im_mags', None)
-    delays    = kwargs.get('delays', None)
     sources   = kwargs.get('sources', None)
     lens      = kwargs.get('lens', None)
     bprofiles = kwargs.get('bprofiles', None)
@@ -815,7 +923,6 @@ def saveInfo_multipleFiles(dirPath, fileName, suffix, **kwargs):
     if images    is not None and images.size!=0 :  np.save(parent_dir + fileName[:-1] + '_images', images)
     if im_obs    is not None and im_obs.size!=0 :  np.save(parent_dir + fileName[:-1] + '_obs', im_obs)
     if im_mags   is not None and im_mags.size!=0 : np.save(parent_dir + fileName[:-1] + '_mags', im_mags)
-    if delays    is not None and delays.size!=0 :  np.save(parent_dir + fileName[:-1] + '_delays', delays)
     if sources   is not None and sources.size!=0 : np.save(parent_dir + fileName[:-1] + '_srcs', sources)
     if lens      is not None: np.save(parent_dir + fileName[:-1] + '_lens', lens)
     if bprofiles is not None: np.save(parent_dir + fileName[:-1] + '_bprofiles', bprofiles)

@@ -172,7 +172,7 @@ def max_darea(izl, izs,**kwargs):
 def firstLook_selFunc(df, **kwargs):
     
     #> kwargs
-    resolution = kwargs.get('resolution', 0.15) # min threshold [arcsec]
+    ER_resolution = kwargs.get('ER_resolution', 0.15) # min threshold [arcsec]
     # max_er     = kwargs.get('max_er', 2.4)      # max ER for d_area normalization [arcsec]
     
     #> loading prior bins
@@ -220,7 +220,7 @@ def firstLook_selFunc(df, **kwargs):
     # p_quad = (df['d_area'] / df['d_area_max']).clip(0,1).fillna(0)
     
     #> applying selection functions
-    df['sel'] = ((df['ER'] >= resolution) &
+    df['sel'] = ((df['ER'] >= ER_resolution) &
                  (np.random.random(len(df)) < df['p_quad']))
     
     return df
@@ -386,7 +386,7 @@ def _grid_v3(x, grid, interp=True):
 def firstLook_selFunc_v3(df, **kwargs):
 
     #> kwargs
-    resolution = kwargs.get('resolution', 0.15)
+    ER_resolution = kwargs.get('ER_resolution', 0.15)
     nph = kwargs.get('nph', 50)
     r_pix_percentage = kwargs.get('r_pix_percentage', 0.5)
     loc = kwargs.get('lookup_loc','./priors/look_up_tables_v3/')
@@ -468,11 +468,11 @@ def firstLook_selFunc_v3(df, **kwargs):
     
     #> selection effects
     if sel_res and sel_slcs:
-        df['sel'] = ((ER >= resolution) & np.isfinite(ER) &
+        df['sel'] = ((ER >= ER_resolution) & np.isfinite(ER) &
                      (np.random.random(len(df)) < p_quad))
     
     if sel_res and not sel_slcs:
-        df['sel'] = ((ER >= resolution) & np.isfinite(ER))
+        df['sel'] = ((ER >= ER_resolution) & np.isfinite(ER))
         
     if not sel_res and sel_slcs:
         df['sel'] = ((np.random.random(len(df)) < p_quad))

@@ -30,11 +30,11 @@ def deflection(X, Y, batch_profiles):
     B = len(batch_profiles)
     Ny, Nx = X.shape
 
-    X = X.astype(np.float32)
-    Y = Y.astype(np.float32)
+    X = X.astype(np.float64)
+    Y = Y.astype(np.float64)
 
-    gradx = np.zeros((B, Ny, Nx), dtype=np.float32)
-    grady = np.zeros((B, Ny, Nx), dtype=np.float32)
+    gradx = np.zeros((B, Ny, Nx), dtype=np.float64)
+    grady = np.zeros((B, Ny, Nx), dtype=np.float64)
 
     #> arrays
     angDist = np.array([p['angDist'] for p in batch_profiles], dtype=np.float32)
@@ -63,12 +63,13 @@ def deflection(X, Y, batch_profiles):
         st = np.sin(theta)
         
         denom = ( radius / np.sqrt(axisrat) / angDist)
-        Xr = (( X[None,:,:]*ct + Y[None,:,:]*st) / pix_arc - x0) / arc_rad / denom  # pix --> rad
-        Yr = ((-X[None,:,:]*st + Y[None,:,:]*ct) / pix_arc - y0) / arc_rad / denom  # pix --> rad
+        Xs = X[None,:,:]/pix_arc - x0;  Ys = Y[None,:,:]/pix_arc - y0     # arcsec, shifted first
+        Xr = ( Xs*ct + Ys*st) / arc_rad / denom
+        Yr = (-Xs*st + Ys*ct) / arc_rad / denom
 
         axis2 = axisrat**2
-        gx = np.zeros_like(Xr, dtype=np.float32)
-        gy = np.zeros_like(Yr, dtype=np.float32)
+        gx = np.zeros_like(Xr, dtype=np.float64)
+        gy = np.zeros_like(Yr, dtype=np.float64)
         for Ai, Si in NFW_COEFFS:
 
             lowp = np.sqrt(axis2*(Si*Si + Xr*Xr) + Yr*Yr)
@@ -81,7 +82,7 @@ def deflection(X, Y, batch_profiles):
         scale = (radius/np.sqrt(axisrat)) * (radius*rho0) / sigCrit / angDist
         gx *= scale
         gy *= scale
-
+        
         gradx += gx*ct - gy*st
         grady += gx*st + gy*ct
 
@@ -97,18 +98,23 @@ def deflection(X, Y, batch_profiles):
         axisrat = np.array([p.get('hern',[{}]*hern_max)[i].get('axisrat',1) for p in batch_profiles], dtype=np.float32)[:,None,None]
         radius = np.array([p.get('hern',[{}]*hern_max)[i].get('radius',1) for p in batch_profiles], dtype=np.float32)[:,None,None]
         norm = np.array([p.get('hern',[{}]*hern_max)[i].get('norm',0) for p in batch_profiles], dtype=np.float32)[:,None,None]
-
-        #> converting, translating, converting grid
-        denom = (radius / np.sqrt(axisrat) / angDist)
-        Xr = ( X[None,:,:]/pix_arc -x0 ) / arc_rad / denom # pix --> rad
-        Yr = ( Y[None,:,:]/pix_arc -y0 ) / arc_rad / denom # pix --> rad
-
+        theta   = np.array( [p.get('hern',[{}]*hern_max )[i].get('theta', 0)*np.pi/180 for p in batch_profiles], dtype=np.float32)[:,None,None]
+        
+        #> declarations
+        ct = np.cos(theta)
+        st = np.sin(theta)
         axis2 = axisrat**2
+        
+        #> translating, rotating, and converting grid
+        denom = ( radius / np.sqrt(axisrat) / angDist)
+        Xs = X[None,:,:]/pix_arc - x0;  Ys = Y[None,:,:]/pix_arc - y0     # arcsec, shifted first
+        Xr = ( Xs*ct + Ys*st) / arc_rad / denom
+        Yr = (-Xs*st + Ys*ct) / arc_rad / denom
 
         scale = (radius/np.sqrt(axisrat)) * (radius*norm) / sigCrit / angDist
 
-        gx = np.zeros_like(Xr, dtype=np.float32)
-        gy = np.zeros_like(Yr, dtype=np.float32)
+        gx = np.zeros_like(Xr, dtype=np.float64)
+        gy = np.zeros_like(Yr, dtype=np.float64)
 
         for Ai, Si in HERN_COEFFS:
 
@@ -119,8 +125,11 @@ def deflection(X, Y, batch_profiles):
             gx += Ai*(axisrat*Xr)*(lowp + axis2*Si)/denom
             gy += Ai*(axisrat*Yr)*(lowp + Si)/denom
 
-        gradx += gx * scale
-        grady += gy * scale
+        gx *= scale
+        gy *= scale
+        
+        gradx += gx*ct - gy*st
+        grady += gx*st + gy*ct
         
     #> MULT - - - - - - -
     max_mult = max(len(p.get('mult', [])) for p in batch_profiles) # gets max number of mult profiles for all galaxies

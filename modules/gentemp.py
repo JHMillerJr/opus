@@ -27,6 +27,9 @@ def function():
     import params
     from modules.units import u; u=u()
     
+    #> method (lpot, deflect)
+    method = 'deflect'
+    
     #> declarations
     numGals       = 10                         # total # of galaxies to generate
     numSource_gal = 10                         # total # of sources per galaxy
@@ -86,9 +89,10 @@ def function():
     priorDict = params.getPriorDict(hmf=hmf, cmr=cmr, shmr=shmr, msr=msr, red=red) # if wanting to draw from priors (hmf, cmr, shmr, msr)
     
     #> image properties kwargs
-    jims = 5                                   # number of request images from each source (5=quad)
-    mags = None                                # if wanting image magnifications (will change saveFlag automatically)
-    observables = ['t12', 't23', 't34', 'd2/d1', 'd3/d1' ,'d4/d1', 'dt23'] # requested lensing observables
+    jims   = 5                                 # number of request images from each source (5=quad)
+    mags   = False                             # if wanting image magnifications (will change saveFlag automatically)
+    delays = False                             # if wanting time delays (will change saveFlag automatically)
+    observables = ['t12', 't23', 't34', 'd2/d1', 'd3/d1' ,'d4/d1', 'dt23', 'd01'] # requested lensing observables
     
     #> bprofiles & paramRanges (can be edited)
     paramRanges = None
@@ -112,6 +116,7 @@ def function():
 
     #> generating!
     generate.genPop(numGals,                      # # galaxies
+                    method=method,                # how to calculate the deflection angles
                     numSource_gal=numSource_gal,  # # sources per galaxy
                     folder=folder,                # data folder to save to
                     suffix=suffix,                # suffix to file/folder name
@@ -135,6 +140,7 @@ def function():
                     jims=jims,                    # requested number of images per source
                     mags=mags,                    # if want image mags
                     observables=observables,      # requested lensing observables
+                    delays=delays,                # if want time delays
                     seed=seed,                    # random seed
                     gpu=False)                    # if want to run on gpu (CURRENTLY NO GPU IMPLEMENTATION)
     
