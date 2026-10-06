@@ -245,6 +245,8 @@ def arrivalOrder(images, x0=0.0, y0=0.0):
     oims = oims[oims[:,0].argsort()][::-1]
     # print(oims)
     
+    print(oims)
+    
     #> if quad
     ordered = np.zeros(oims.shape)
     if len(oims) >= 5:
