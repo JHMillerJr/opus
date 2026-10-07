@@ -238,25 +238,25 @@ def arrivalOrder(images, x0=0.0, y0=0.0):
     
     #> collecting distances
     oims = abs(np.linalg.norm(images - np.full(shape=images.shape, fill_value=[x0, y0]), axis=1)) # getting distances
-    o_angles = np.arctan2(images[:,1], images[:,0])
+    o_angles = np.arctan2(images[:,1] - y0, images[:,0] - x0)
     oims = np.hstack((np.array([oims]).T, np.array([o_angles]).T, images))
 
     #> sorts by distance
     oims = oims[oims[:,0].argsort()][::-1]
     # print(oims)
     
-    print(oims)
-    
     #> if quad
     ordered = np.zeros(oims.shape)
-    if len(oims) >= 5:
+    if len(oims) >= 4:
         
         #> finding max distance between ims 12 and 34
         ind = np.argmax([oims[0][0] - oims[1][0], oims[2][0] - oims[3][0]]) * 3 # either 0 or 3
         ordered[ind] = oims[ind] # adds 1st (or 4th) image to final array
         # print(ordered)
+        
         #> dropping 5th (not important)
-        dummy = oims[:-1]
+        if len(oims) == 5: dummy = oims[:-1]
+        else: dummy = oims
         
         #> finding opposite image
         dummy = dummy[dummy[:,1].argsort()] # sorting by angle
@@ -270,7 +270,7 @@ def arrivalOrder(images, x0=0.0, y0=0.0):
         #> finding law of cosines angle between remaining images (other angle does not work for this!!)
         angle21 = lawCos(a=dummy[2][0], b=dummy[1][0], c=np.linalg.norm(dummy[2][2:]-dummy[1][2:]))
         angle23 = lawCos(a=dummy[2][0], b=dummy[3][0], c=np.linalg.norm(dummy[2][2:]-dummy[3][2:]))
-
+        
         #> assigning remaining images
         if ind == 0: # if found 1st & 2nd
             if angle21 < angle23:
@@ -286,7 +286,7 @@ def arrivalOrder(images, x0=0.0, y0=0.0):
             else:
                 ordered[1] = dummy[3] # image 2
                 ordered[0] = dummy[1] # image 1
-        ordered[-1] = oims[-1] # filling in 5th image
+        if len(oims) == 5: ordered[-1] = oims[-1] # filling in 5th image
 
         return ordered[:,2:] # quad
     
