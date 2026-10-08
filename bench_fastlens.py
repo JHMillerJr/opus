@@ -25,16 +25,17 @@ import fastlens as fl
 if __name__ == '__main__':
 
     #> declarations
-    numGals       = 20                                     # galaxies
+    numGals       = 10                                     # galaxies
     numSource_gal = 100                                    # sources per galaxy
     nph           = 50                                     # grid half-width [pix]
     observables   = ['t12', 't23', 't34', 'd2/d1', 'd3/d1', 'd4/d1', 'dt23']
     rng           = np.random.default_rng(42)
 
-    #> galaxies (no priors; fixed redshifts)
-    galProf     = generate.galProfiles(nfw=True, hern=True, mult=[], ex=False)
+    #> galaxies (no priors; fixed redshifts; pixel scale grows w/ nph --> fixed field of view)
+    galProf     = generate.galProfiles(nfw=True, hern=True, mult=[1,3,4], ex=False)
     paramRanges = params.toggleParams(galProf)
-    bprofiles   = params.bprofiles(numGals, ranges=paramRanges, redshifts=np.tile((0.5, 1.0), (numGals, 1)))
+    pix_arc     = np.full(numGals, 60 * nph/50)            # pix/arcsec
+    bprofiles   = params.bprofiles(numGals, ranges=paramRanges, pix_arc=pix_arc, redshifts=np.tile((0.5, 1.0), (numGals, 1)))
     numSrc      = numGals*numSource_gal
 
     #>>># NEW #<<<#
@@ -69,6 +70,17 @@ if __name__ == '__main__':
     print(f'> speed-up: {t_old/t_new:.1f}x')
     print(f'> old complete quads (same sources): {ok.sum()}/{numSrc}')
     print(f'> old vs new image positions: median {np.median(d)*1e3:.2f} mas, max {d.max()*1e3:.1f} mas')
+    
+    #> order-independent comparison (nearest new image for each old image)
+    dmat  = np.linalg.norm(oldI[ok][:,:,None,:] - newI[ok][:,None,:,:], axis=-1)  # (Q, 5, 5) arcsec
+    d_set = dmat.min(axis=2).max(axis=1)                                           # arcsec
+    print(f'> order-independent: median {np.median(d_set)*1e3:.2f} mas, max {d_set.max()*1e3:.1f} mas')
+    
+    #> worst quad (in the original comparison)
+    w = np.argmax(d)
+    print(f'> worst quad: source {np.flatnonzero(ok)[w]} at {srcs[ok][w]} [arcsec]')
+    print('> old images [arcsec]:\n', oldI[ok][w])
+    print('> new images [arcsec]:\n', newI[ok][w])
 
     # end
 # thank

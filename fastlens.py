@@ -1,5 +1,5 @@
 #> name: fastlens.py
-#> author: John Miller Jr (prototype drafted with Claude)
+#> author: John Miller Jr
 #> descrp: vectorized image finding for opus: grid seeding + newton refinement on analytic deflections
 
 """ #> IMPORTS =======================
@@ -16,7 +16,7 @@ from modules.units import u; u=u()
 """ #> CSE COEFFICIENTS ==============
 ================================== """
 
-#> NFW CSE coefficients (16; lower accuracy); 10^-2 in kappa
+#> NFW CSE coefficients (Ai, Si) (16; lower accuracy); 10^-2 in kappa
 NFW_COEFFS = np.array([
     [1.434960e-16, 4.041628e-06], [5.232413e-14, 3.086267e-05],
     [2.666660e-12, 1.298542e-04], [7.961761e-11, 4.131977e-04],
@@ -28,7 +28,7 @@ NFW_COEFFS = np.array([
     [2.576763e+02, 1.842613e+02], [1.422619e+03, 8.206569e+02]
     ], dtype=np.float32).astype(np.float64)
 
-#> hernquist CSE coefficients (13; lower accuracy); 10^-2 in kappa
+#> hernquist CSE coefficients (Ai, Si) (13; lower accuracy); 10^-2 in kappa
 HERN_COEFFS = np.array([
     [7.775712e-16, 4.426947e-06], [3.279878e-13, 3.551219e-05],
     [2.374931e-11, 1.639271e-04], [1.137151e-09, 6.047024e-04],
@@ -40,101 +40,173 @@ HERN_COEFFS = np.array([
     ], dtype=np.float32).astype(np.float64)
 
 
-""" #> POINT DEFLECTIONS =============
+""" #> DEFLECTION ANGLES =============
 ================================== """
 
-#> deflection of one CSE profile at points (same conventions as deflectionCPU2)
-def _alpha_cse(x, y, prof, coeffs, norm_key, angDist, sigCrit):
+#> CSE deflection angles at points (x,y)
+def cse_alpha(x, y, prof, coeffs, norm_key, angDist, sigCrit):
 
+    #> unpacking kwargs
+    arc_rad = u.arc_rad                             # arcsec/rad
+    x0      = prof.get('x0', 0.0)                   # arcsec
+    y0      = prof.get('y0', 0.0)                   # arcsec
+    q       = prof.get('axisrat', 1.0)              # []
+    r0      = prof.get('radius', 1.0)               # kpc
+    rho0    = prof.get(norm_key, 0.0)               # solMass/kpc^3
+    th      = prof.get('theta', 0.0) * np.pi/180    # deg --> rad
+    
     #> declarations
-    arc_rad = u.arc_rad                                    # arcsec/rad
-    x0, y0  = prof.get('x0', 0.0), prof.get('y0', 0.0)     # arcsec
-    q       = prof.get('axisrat', 1.0)                     # []
-    r0      = prof.get('radius', 1.0)                      # kpc
-    rho0    = prof.get(norm_key, 0.0)                      # solMass/kpc^3
-    th      = prof.get('theta', 0.0) * np.pi/180           # rad
-    ct, st  = np.cos(th), np.sin(th)
-    q2      = q*q
+    ct = np.cos(th) 
+    st = np.sin(th) 
+    q2 = q*q
 
-    #> shifting, rotating, and scaling (arcsec --> units of r0')
-    denom = (r0 / np.sqrt(q) / angDist) * arc_rad          # arcsec
-    xs_ = x - x0; ys_ = y - y0                             # arcsec
-    Xr = ( xs_*ct + ys_*st) / denom                        # []
-    Yr = (-xs_*st + ys_*ct) / denom                        # []
-    X2, Y2 = Xr*Xr, Yr*Yr
-
-    #> summing CSE terms (vectorized over coefficients: (Nc, N) arrays)
+    #> shifting, rotating, and scaling points (arcsec --> units of r0')
+    denom = (r0 / np.sqrt(q) / angDist) * arc_rad    # arcsec
+    Xr    = (  (x - x0)*ct + (y - y0)*st ) / denom
+    Yr    = ( -(x - x0)*st + (y - y0)*ct ) / denom
+    
+    #> more declarations (fight me)
     shp = Xr.shape
-    Xr, Yr, X2, Y2 = Xr.ravel()[None], Yr.ravel()[None], X2.ravel()[None], Y2.ravel()[None]
-    Ai, Si = coeffs[:,0,None], coeffs[:,1,None]
-    lowp = np.sqrt(q2*(Si*Si + X2) + Y2)
-    upp  = (lowp + Si)**2 + (1 - q2)*X2
-    w    = Ai*q / (Si * lowp * upp)
-    gx   = (w*(lowp + q2*Si)).sum(0).reshape(shp) * Xr.reshape(shp)
-    gy   = (w*(lowp + Si)).sum(0).reshape(shp)    * Yr.reshape(shp)
+    X2 = Xr*Xr
+    Y2 = Yr*Yr
+    
+    #> flattening and reshaping
+    Xr = Xr.ravel()[None]                 # shape=(1,N)
+    Yr = Yr.ravel()[None]                 # shape=(1,N)
+    X2 = X2.ravel()[None]                 # shape=(1,N)
+    Y2 = Y2.ravel()[None]                 # shape=(1,N)
 
-    #> scaling (rad --> arcsec) + rotating back
-    scale = (r0/np.sqrt(q)) * (r0*rho0) / sigCrit / angDist * arc_rad  # arcsec
-    gx *= scale; gy *= scale
+    #> getting coefficents
+    Ai = coeffs[:,0,None]                 # shape=(Nc,1)
+    Si = coeffs[:,1,None]                 # shape=(Nc,1)
+    
+    #>>># DEFLECT #<<<#
+    
+    #> separating equations
+    lowp = np.sqrt(q2*(Si*Si + X2) + Y2)  # eq 18, shape=(Nc,N)
+    upp  = (lowp + Si)**2 + (1 - q2)*X2   # eq 17
+    w    = Ai*q / (Si * lowp * upp)       # part of eq 19/20
+    
+    #> calculating deflection angles! (and reshapes)
+    gx   = ( w*(lowp + q2*Si)).sum(0).reshape(shp) * Xr.reshape(shp)  # eq 19
+    gy   = ( w*(lowp + Si)   ).sum(0).reshape(shp) * Yr.reshape(shp)  # eq 20
 
-    return gx*ct - gy*st, gx*st + gy*ct # arcsec
+    #> scaling (--> arcsec)
+    scale = (r0/np.sqrt(q)) * (r0*rho0) / sigCrit / angDist * arc_rad # eq 24
+    gx *= scale            # arcsec
+    gy *= scale            # arcsec
+    
+    #> rotating back
+    gx_ = gx*ct - gy*st    # arcsec
+    gy_ = gx*st + gy*ct    # arcsec
+
+    return gx_, gy_
 
 
-#> deflection + jacobian of one CSE profile at points (analytic second derivatives)
-def _alpha_jac_cse(x, y, prof, coeffs, norm_key, angDist, sigCrit):
+#> CSE deflection angles + jacobian at points (x,y) (analytic second derivatives)
+def cse_alpha_jac(x, y, prof, coeffs, norm_key, angDist, sigCrit):
+
+    #> unpacking kwargs
+    arc_rad = u.arc_rad                             # arcsec/rad
+    x0      = prof.get('x0', 0.0)                   # arcsec
+    y0      = prof.get('y0', 0.0)                   # arcsec
+    q       = prof.get('axisrat', 1.0)              # []
+    r0      = prof.get('radius', 1.0)               # kpc
+    rho0    = prof.get(norm_key, 0.0)               # solMass/kpc^3
+    th      = prof.get('theta', 0.0) * np.pi/180    # deg --> rad
     
     #> declarations
-    arc_rad = u.arc_rad                                    # arcsec/rad
-    x0, y0  = prof.get('x0', 0.0), prof.get('y0', 0.0)     # arcsec
-    q       = prof.get('axisrat', 1.0)                     # []
-    r0      = prof.get('radius', 1.0)                      # kpc
-    rho0    = prof.get(norm_key, 0.0)                      # solMass/kpc^3
-    th      = prof.get('theta', 0.0) * np.pi/180           # rad
-    ct, st  = np.cos(th), np.sin(th)
-    q2      = q*q
+    ct = np.cos(th)
+    st = np.sin(th)
+    q2 = q*q
+
+    #> shifting, rotating, and scaling points (arcsec --> units of r0')
+    denom = (r0 / np.sqrt(q) / angDist) * arc_rad    # arcsec
+    Xr    = (  (x - x0)*ct + (y - y0)*st ) / denom
+    Yr    = ( -(x - x0)*st + (y - y0)*ct ) / denom
     
-    #> shifting, rotating, and scaling (arcsec --> units of r0')
-    denom = (r0 / np.sqrt(q) / angDist) * arc_rad          # arcsec
-    xs_ = x - x0; ys_ = y - y0                             # arcsec
-    X = ( xs_*ct + ys_*st) / denom                         # []
-    Y = (-xs_*st + ys_*ct) / denom                         # []
-    X2, Y2 = X*X, Y*Y
+    #> more declarations
+    shp = Xr.shape
+    X2  = Xr*Xr
+    Y2  = Yr*Yr
     
-    #> summing CSE terms (alpha + its derivatives in the profile frame; vectorized over coefficients)
-    shp = X.shape
-    X, Y, X2, Y2 = X.ravel()[None], Y.ravel()[None], X2.ravel()[None], Y2.ravel()[None]
-    Ai, Si = coeffs[:,0,None], coeffs[:,1,None]
-    p   = np.sqrt(q2*(Si*Si + X2) + Y2)                    # small psi
-    ip  = 1/p
-    px_ = q2*X*ip; py_ = Y*ip                              # d(psi)/dX, d(psi)/dY
-    ps  = p + Si
-    P   = ps*ps + (1 - q2)*X2                              # large psi
-    Px  = 2*ps*px_ + 2*(1 - q2)*X                          # d(Psi)/dX
-    Py  = 2*ps*py_                                         # d(Psi)/dY
-    iD  = ip/P                                             # 1/(psi Psi)
-    Dx_D = px_*ip + Px/P; Dy_D = py_*ip + Py/P             # d(ln D)/dX, d(ln D)/dY
-    c   = (Ai*q/Si)*iD                                     # Ai q / (s psi Psi)
-    ux  = p + q2*Si; uy = ps                               # (psi + q^2 s), (psi + s)
-    fx  = c*X*ux; fy = c*Y*uy                              # per-term alpha_x, alpha_y
-    gx  = fx.sum(0); gy = fy.sum(0)
-    gxx = (c*(ux + X*px_) - fx*Dx_D).sum(0)
-    gxy = (c*X*py_        - fx*Dy_D).sum(0)
-    gyy = (c*(uy + Y*py_) - fy*Dy_D).sum(0)
-    gx, gy, gxx, gxy, gyy = [v.reshape(shp) for v in (gx, gy, gxx, gxy, gyy)]
+    #> flattening and reshaping
+    Xr = Xr.ravel()[None]                   # shape=(1,N)
+    Yr = Yr.ravel()[None]                   # shape=(1,N)
+    X2 = X2.ravel()[None]                   # shape=(1,N)
+    Y2 = Y2.ravel()[None]                   # shape=(1,N)
+
+    #> getting coefficents
+    Ai = coeffs[:,0,None]                   # shape=(Nc,1)
+    Si = coeffs[:,1,None]                   # shape=(Nc,1)
     
-    #> scaling (rad --> arcsec) + rotating back
-    scale = (r0/np.sqrt(q)) * (r0*rho0) / sigCrit / angDist * arc_rad  # arcsec
-    gx *= scale; gy *= scale
-    jfac = scale/denom; gxx *= jfac; gxy *= jfac; gyy *= jfac            # []
-    ax = gx*ct - gy*st; ay = gx*st + gy*ct                               # arcsec
+    #>>># DEFLECT + JACOBIAN #<<<#
     
-    #> rotating jacobian: R J R^T
-    c2, s2, cs = ct*ct, st*st, ct*st
-    axx = gxx*c2 - 2*gxy*cs + gyy*s2
-    ayy = gxx*s2 + 2*gxy*cs + gyy*c2
-    axy = (gxx - gyy)*cs + gxy*(c2 - s2)
+    #> separating equations
+    lowp   = np.sqrt(q2*(Si*Si + X2) + Y2)  # eq 18, shape=(Nc,N)
+    lowps  = lowp + Si
+    upp    = lowps*lowps + (1 - q2)*X2      # eq 19
+    w      = Ai*q / (Si * lowp * upp)       # part of eq 19/20
     
-    return ax, ay, axx, axy, axy, ayy # arcsec, []
+    #> calculating lowp derivatives
+    ilowp  = 1/lowp                         # 1/lowp
+    lowp_x = q2*Xr*ilowp                    # d(lowp)/dX
+    lowp_y = Yr*ilowp                       # d(lowp)/dY
+    
+    #> calculating upp derivatives
+    upp_x  = 2*lowps*lowp_x + 2*(1 - q2)*Xr # d(upp)/dX
+    upp_y  = 2*lowps*lowp_y                 # d(upp)/dY
+    lnD_x  = (lowp_x*ilowp) + (upp_x/upp)   # d(ln D)/dX, D = lowp*upp
+    lnD_y  = (lowp_y*ilowp) + (upp_y/upp)   # d(ln D)/dY
+    
+    #> numerators (saving for alpha derivatives)
+    ux     = lowp + q2*Si                   # x numerator
+    uy     = lowps                          # y numerator
+    
+    #> calculating deflection angles!
+    gx = w * Xr * ux                        # shape=(Nc,N)
+    gy = w * Yr * uy                        # ...
+    
+    #> calculating alpha derivatives
+    gxx = ( w*(ux + Xr*lowp_x) - gx*lnD_x ).sum(0)  # d(gx)/dX
+    gxy = ( w * Xr * lowp_y    - gx*lnD_y ).sum(0)  # d(gx)/dY
+    gyy = ( w*(uy + Yr*lowp_y) - gy*lnD_y ).sum(0)  # d(gy)/dY
+    
+    #> back to original shape
+    gx  = gx.sum(0).reshape(shp)
+    gy  = gy.sum(0).reshape(shp)
+    gxx = gxx.reshape(shp)
+    gxy = gxy.reshape(shp)
+    gyy = gyy.reshape(shp)
+    
+    #>>># DEFLECT #<<<#
+    
+    #> scaling (--> arcsec)
+    scale = (r0/np.sqrt(q)) * (r0*rho0) / sigCrit / angDist * arc_rad
+    gx *= scale            # arcsec
+    gy *= scale            # arcsec
+    
+    #> rotating deflection angles back
+    gx_ = gx*ct - gy*st    # arcsec
+    gy_ = gx*st + gy*ct    # arcsec
+    
+    #>>># JACOBIAN #<<<#
+    
+    #> scaling jacobian (d/dX --> d/dx)
+    jfac = scale / denom
+    gxx *= jfac
+    gxy *= jfac
+    gyy *= jfac
+    
+    #> rotating jacobian back: R J R^T
+    c2   = ct*ct
+    s2   = st*st
+    cs   = ct*st
+    gxx_ = gxx*c2 - 2*gxy*cs + gyy*s2
+    gyy_ = gxx*s2 + 2*gxy*cs + gyy*c2
+    gxy_ = (gxx - gyy)*cs + gxy*(c2 - s2)
+    
+    return gx_, gy_, gxx_, gxy_, gxy_, gyy_   # arcsec, []
 
 
 #> deflection + jacobian at points (analytic for CSE & shear, central differences for multipoles)
@@ -147,7 +219,7 @@ def alpha_jac_points(x, y, bprof, h=1e-6):
     #> nfw + hernquist
     for key, coeffs, nkey in [('nfw', NFW_COEFFS, 'rho0'), ('hern', HERN_COEFFS, 'norm')]:
         for prof in bprof.get(key, []):
-            for o, v in zip(out, _alpha_jac_cse(x, y, prof, coeffs, nkey, angDist, sigCrit)): o += v
+            for o, v in zip(out, cse_alpha_jac(x, y, prof, coeffs, nkey, angDist, sigCrit)): o += v
     
     #> multipoles (analytic; psi = -(a_m/m) r^slope cos[m(phi - phi_m)], skipping norm=0)
     for prof in bprof.get('mult', []):
@@ -198,12 +270,12 @@ def alpha_points(x, y, bprof):
 
     #> nfw
     for prof in bprof.get('nfw', []):
-        gx, gy = _alpha_cse(x, y, prof, NFW_COEFFS, 'rho0', angDist, sigCrit)
+        gx, gy = cse_alpha(x, y, prof, NFW_COEFFS, 'rho0', angDist, sigCrit)
         ax += gx; ay += gy
 
     #> hernquist
     for prof in bprof.get('hern', []):
-        gx, gy = _alpha_cse(x, y, prof, HERN_COEFFS, 'norm', angDist, sigCrit)
+        gx, gy = cse_alpha(x, y, prof, HERN_COEFFS, 'norm', angDist, sigCrit)
         ax += gx; ay += gy
 
     #> multipoles (skipping norm=0)
@@ -229,27 +301,6 @@ def alpha_points(x, y, bprof):
         ay += -g*(x*s2 - y*c2)                             # arcsec
 
     return ax, ay # arcsec
-
-
-#> lensing jacobian at points (central differences of analytic deflections)
-def jac_points(x, y, bprof, h=1e-6):
-    """
-    returns: d(alpha_x)/dx, d(alpha_x)/dy, d(alpha_y)/dx, d(alpha_y)/dy []
-    """
-
-    #> stacking the 4 stencil points into one call (vectorized)
-    xx = np.concatenate([x+h, x-h, x,   x  ])              # arcsec
-    yy = np.concatenate([y,   y,   y+h, y-h])              # arcsec
-    ax, ay = alpha_points(xx, yy, bprof)
-    n = len(x)
-
-    #> derivatives
-    axx = (ax[:n]    - ax[n:2*n]) / (2*h)
-    ayx = (ay[:n]    - ay[n:2*n]) / (2*h)
-    axy = (ax[2*n:3*n] - ax[3*n:]) / (2*h)
-    ayy = (ay[2*n:3*n] - ay[3*n:]) / (2*h)
-
-    return axx, axy, ayx, ayy
 
 
 """ #> POINT POTENTIAL ===============
