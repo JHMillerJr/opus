@@ -1,5 +1,5 @@
 #> name: bench_fastlens.py
-#> author: John Miller Jr (benchmark drafted with Claude)
+#> author: John Miller Jr
 #> descrp: times the current opus quad generation vs the vectorized fastlens prototype (prints only; saves nothing)
 
 """ #> IMPORTS =======================
@@ -25,7 +25,7 @@ import fastlens as fl
 if __name__ == '__main__':
 
     #> declarations
-    numGals       = 10                                     # galaxies
+    numGals       = 100                                     # galaxies
     numSource_gal = 100                                    # sources per galaxy
     nph           = 50                                     # grid half-width [pix]
     observables   = ['t12', 't23', 't34', 'd2/d1', 'd3/d1', 'd4/d1', 'dt23']
