@@ -641,7 +641,7 @@ def find_images(xg, yg, bx_g, by_g, srcs, bprof, **kwargs):
         byi = by00*(1-dx)*(1-dy) + by01*dx*(1-dy) + by10*(1-dx)*dy + by11*dx*dy # arcsec
 
         #> jacobian of the bilinear map, A = [beta_x=[a, b], beta_y=[c, d]]
-        a = ( (bx01-bx00)*(1-dy) + (bx11-bx10)*dy ) / arc_pix
+        a = ( (bx01-bx00)*(1-dy) + (bx11-bx10)*dy ) / arc_pix # dimensionless
         b = ( (bx10-bx00)*(1-dx) + (bx11-bx01)*dx ) / arc_pix
         c = ( (by01-by00)*(1-dy) + (by11-by10)*dy ) / arc_pix
         d = ( (by10-by00)*(1-dx) + (by11-by01)*dx ) / arc_pix
@@ -673,37 +673,44 @@ def find_images(xg, yg, bx_g, by_g, srcs, bprof, **kwargs):
     by = srcs[sidx,1]                          # arcsec
 
 
-    #>>># STAGE 2: NEWTON ON ANALYTIC DEFLECTIONS (w/ backtracking) #<<<#
+    #>>># 2. NEWTON ON ANALYTIC DEFLECTIONS #<<<#
 
-    #> analytic deflections + jacobian at every root
+    #> deflections + jacobian at each seed position (x,y)
     ax, ay, axx, axy, ayx, ayy = alpha_jac_points(x, y, bprof)
 
-    #> initial residuals, f = theta - alpha(theta) - beta_s
-    rx, ry = x - ax - bx, y - ay - by                        # arcsec
-    rn = np.hypot(rx, ry)                                    # |f| [arcsec]
+    #> initializing residuals (f_x = theta_x - alpha_x - beta_x)
+    rx = x - ax - bx 
+    ry = y - ay - by 
+    rn = np.hypot(rx, ry)
 
-    #> roots still iterating
+    #> active list
     active = np.ones(len(x), dtype=bool)
 
-    #> newton iterations (only on active roots)
+    #> newton loop
+    #> iterates nit times only 'active' seeds exist
     for _ in range(nit):
+        
+        #> if converged already
         if not active.any(): break
-        ia = np.flatnonzero(active)                          # indices of active roots
+        ia = np.flatnonzero(active) # indices of active roots
 
-        #> lensing jacobian, A = I - d(alpha)/d(theta) = [[a, b], [c, d]]
-        a, b, c, d = 1-axx[ia], -axy[ia], -ayx[ia], 1-ayy[ia]
+        #> lensing jacobian
+        a = 1-axx[ia]            # 1 - da_x/d_x
+        b =  -axy[ia]            # 0 - da_x/d_y
+        c =  -ayx[ia]            # 0 - da_y/d_x
+        d = 1-ayy[ia]            # 1 - da_y/d_y
         det = a*d - b*c
 
         #> newton step, s = A^-1 f
         sx = ( d*rx[ia] - b*ry[ia]) / det                    # arcsec
         sy = (-c*rx[ia] + a*ry[ia]) / det                    # arcsec
-        step = np.hypot(sx, sy)                              # arcsec
+        step = np.hypot(sx, sy)
 
-        #> damping: step length capped at maxstep pixels
+        #> damping step size, length capped at maxstep (3) pixels
         lam = np.minimum(1.0, maxstep*arc_pix / np.maximum(step, 1e-300))
 
-        #> backtracking: halving the step until the residual decreases (max 8 halvings)
-        todo = np.arange(len(ia))                            # positions in ia still searching
+        #> backtracking, halving the step until the residual decreases (max 8 halvings)
+        todo = np.arange(len(ia))
         for _ in range(8):
 
             #> trial positions, theta - lam*s
@@ -715,7 +722,7 @@ def find_images(xg, yg, bx_g, by_g, srcs, bprof, **kwargs):
             o = alpha_jac_points(xt, yt, bprof)              # (ax, ay, axx, axy, ayx, ayy)
             rxt = xt - o[0] - bx[k]                          # arcsec
             ryt = yt - o[1] - by[k]                          # arcsec
-            rnt = np.hypot(rxt, ryt)                         # arcsec
+            rnt = np.hypot(rxt, ryt) 
 
             #> accepting trials w/ a sufficient decrease in |f|
             ok = rnt < rn[k] * (1 - 1e-4*lam[todo]) + 1e-12
@@ -725,27 +732,27 @@ def find_images(xg, yg, bx_g, by_g, srcs, bprof, **kwargs):
             x[kk], y[kk], rx[kk], ry[kk], rn[kk] = xt[ok], yt[ok], rxt[ok], ryt[ok], rnt[ok]
             axx[kk], axy[kk], ayx[kk], ayy[kk] = o[2][ok], o[3][ok], o[4][ok], o[5][ok]
 
-            #> halving the step for the rejected trials
-            todo = todo[~ok]
-            lam[todo] *= 0.5
-            if len(todo) == 0: break
+            #> updating seeds 
+            todo = todo[~ok]                  # removing accepted step
+            lam[todo] *= 0.5                  # halving step size to try next
+            if len(todo) == 0: break          # if all have been accepted
 
-        #> deactivating: converged (tiny step), stalled (step cut below 1%), or no decrease found
-        active[ia[(lam*step < tol)]] = False
-        active[ia[lam < 1e-2]] = False
-        active[ia[todo]] = False
+        #> deactivating seeds
+        active[ia[(lam*step < tol)]] = False  # converged
+        active[ia[lam < 1e-2]] = False        # stalled (step size is tiny)
+        active[ia[todo]] = False              # no decrease found (still trying to half)
 
 
     #>>># KEEPING ROOTS #<<<#
 
-    #> det(A) at each root (magnification, mu = 1/det(A))
-    detA = (1-axx)*(1-ayy) - axy*ayx
-
     #> keeping roots that solve the lens equation
     good = rn < tol_res
+    
+    #> saving info
+    detA = (1-axx)*(1-ayy) - axy*ayx
     sidx, x, y, detA = sidx[good], x[good], y[good], detA[good]
 
-    #> merging duplicate roots (det(A) carried along)
+    #> merging duplicate roots
     sidx, x, y, detA = _merge(sidx, x, y, tol_merge, detA)
 
 
@@ -772,17 +779,19 @@ def find_images(xg, yg, bx_g, by_g, srcs, bprof, **kwargs):
     return {'images': ims, 'mu': mu, 'nims': nims} # arcsec, signed mags, counts
 
 
-#> merges points of the same source closer than tol (vectorized)
+#> merges points of the same source closer than tol
 def _merge(sidx, x, y, tol, *extra):
 
     #> sorting by source, then x, then y
     order = np.lexsort((y, x, sidx))
     sidx, x, y = sidx[order], x[order], y[order]
-    extra = [e[order] for e in extra]          # extra arrays follow the same order
+    extra = [e[order] for e in extra] # extra arrays follow the same order
 
     #> flagging later points within tol of an earlier kept point (up to 15 neighbours back)
     dup = np.zeros(len(x), dtype=bool)
     for lag in range(1, 16):
+        
+        #> if end is reached
         if lag >= len(x): break
 
         #> point i vs point i-lag: same source + closer than tol
