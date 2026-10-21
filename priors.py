@@ -17,7 +17,7 @@ from scipy.integrate import cumulative_trapezoid
 import modules.lookup as lookup
 from modules.units import u; u=u()
 import modules.error as error
-from modules.truncated_mvn_sampler.minimax_tilting_sampler import TruncatedMVN   
+from modules.truncated_mvn_sampler.minimax_tilting_sampler import TruncatedMVN
 
 #> colossus
 from colossus.lss import mass_function
@@ -27,117 +27,62 @@ from colossus.cosmology import cosmology as ccos
 maxTries = 100
 fontsize, labelpad = 15, 10
 obs_redshift_file = '../observed_quads/redshifts.csv'
-    
+
 
 """ #> DRAWING SAMPLES ===============
 ================================== """
 
-#> sampling from the priors
-def sample_priors(numGals, priorDict, nph, **kwargs):
+#> sampling from the priors (redshifts --> nfw --> hern --> autoscaling + selection)
+def sample_priors(numGals, **kwargs):
     
-    #> preloading zl files
-    # lookup.preload_lookup_v3(verbose=True)
+    #> kwargs
+    priorDict = kwargs.get('priorDict')         # which priors are on (nfw, hern, red)
+    redshifts = kwargs.get('redshifts', None)   # (numGals, 2) redshifts, None = drawn
+    seed      = kwargs.get('seed', None)        # random seed
+    df_in     = kwargs.get('df_in', None)       # galaxy values for priors that are off (log10_M_vir, c_vir, log10_M_star, R_eff)
+    redraw    = kwargs.get('redraw', None)      # redraw(inds) --> new df_in rows for rejected galaxies (varied params)
     
-    #> parent kwargs
-    redshifts  = kwargs.get('redshifts', None) # list of redshifts
-    cosmo      = kwargs.get('cosmo', u.cosmo)  # cosmology
-    seed       = kwargs.get('seed', None)      # random seed
-    
-    #> lookup interpolation kwargs
-    interp_zl    = kwargs.get('interp_zl',    False)
-    interp_zs    = kwargs.get('interp_zs',    False)
-    interp_mvir  = kwargs.get('interp_mvir',  True)
-    interp_mstar = kwargs.get('interp_mstar', True)
-    interp_re    = kwargs.get('interp_re',    True)
-    interp_kw    = {'interp_zl': interp_zl, 'interp_zs': interp_zs,
-                    'interp_mvir': interp_mvir, 'interp_mstar': interp_mstar,
-                    'interp_re': interp_re}
+    #> checking the galaxy values
+    need = {'nfw': ['log10_M_vir', 'c_vir'], 'hern': ['log10_M_star', 'R_eff']}
+    for group in need:
+        if priorDict[group]: continue
+        if df_in is None or any(col not in df_in for col in need[group]):
+            error.phrase(f'{group} priors are off, but {need[group]} were not supplied (df_in)')
     
     #> setting random seed
     np.random.seed(seed)
     
-    #> msr kwargs
-    msr_method = kwargs.get('msr_method', '18mowla') # what stellar mass-size relation to use
+    #> redshifts (rows w/ both redshifts drawn can be redrawn)
+    if redshifts is None: z_drawn = np.ones(numGals, dtype=bool)
+    else: z_drawn = np.broadcast_to(np.all(np.array(redshifts, dtype=object).reshape(-1,2) == None, axis=1), numGals)
+    df = pd.DataFrame(draw_redshifts(numGals, **kwargs), columns=['zl', 'zs'])
     
-    #> declarations
-    msr_func = {'14wel':   mass_r_relation_14wel,   # MSR from 14 van der Wel+
-                '18mowla': mass_r_relation_18mowla, # MSR from 18 Mowla+
-                '25cook':  mass_r_relation_25cook}  # MSR from 25 Cook+
-    
-    #> sampling redshifts
-    if redshifts is None: redshifts = np.full((numGals,2), None, dtype=object)
-    if np.all(redshifts[:,0] == None):
-        
-        #> if both redshifts are missing
-        if np.all(redshifts[:,1] == None):
-            redshifts = drawRedshifts(numGals, **kwargs)
-        else: 
-            #> if only zl is missing (zs is known)
-            redshifts[:,0] = np.array([ 
-                             conditional_redshifts(z=zs,
-                                                   known='zs',
-                                                   **kwargs)
-                             for zs in np.array(redshifts[:,1]) ]) # iterating thru each zs
-    #> if zl is supplied, if zs is not supplied
-    elif np.all(redshifts[:,1] == None):
-        redshifts[:,1] = np.array([ 
-                         conditional_redshifts(z=zl,
-                                               known='zl',
-                                               **kwargs)
-                         for zl in np.array(redshifts[:,0]) ]) # iterating thru each zl
-
-    #> initializing dataframe
-    #> dataframe
-    names = ['zl', 'zs']
-    data = np.vstack([redshifts[:,0],      # zl
-                      redshifts[:,1]]).T   # zs
-    df = pd.DataFrame(data, columns=names)
-        
     #> main sample function
-    def sample(df):
-    
-        #> halo mass function
-        halom = halo_mass_fn(df['zl'],              # array of lens redshifts
-                             cosmo=cosmo,           # cosmology
-                             **kwargs)              # prior kwargs       
+    def sample(df, df_in=None):
         
-        #> halo mass-concentration relation
-        haloc = mass_c_vir_rel(M_virs=halom,        # array of virial halo masses
-                               zls=df['zl'],        # array of redshifts
-                               cosmo=cosmo)         # cosmology
+        #> nfw priors (halo mass function + mass-concentration relation)
+        if priorDict['nfw']: 
+            nfw = draw_nfw(df['zl'], **kwargs)
+            df, M_halos = df.join(nfw), nfw.attrs['M_halo']                     # solMass (exact)
+        else: 
+            df[need['nfw']] = df_in[need['nfw']].to_numpy(dtype=float)
+            M_halos = 10**df['log10_M_vir'].to_numpy(dtype=float)               # solMass
         
-        #> stellar-to-halo mass relation
-        mstar_nsig = np.random.normal(size=len(df))
-        starm = stellar_h_mass_rel(M_virs=halom,    # array of virial halo masses
-                                   zls=df['zl'],    # array of lens redshifts
-                                   nsig=mstar_nsig) # sigma offset
-        
-        #> stellar mass-size relation
-        re_nsig = np.random.normal(size=len(df))
-        reffs = msr_func[msr_method](M_stars=starm, # array of stellar masses [solM]
-                                     zls=df['zl'],  # array of lens redshifts
-                                     nsig=re_nsig)  # sigma offset
-        
-        #> converting masses
-        log10_halom = np.log10(halom)
-        log10_starm = np.log10(starm)
-        
-        #> saving
-        df['log10_M_vir'] = log10_halom
-        df['c_vir'] = haloc
-        df['log10_M_star'] = log10_starm
-        df['R_eff'] = reffs
-        df['mstar_nsig'] = mstar_nsig
-        df['re_nsig'] = re_nsig
+        #> hernquist priors (stellar-to-halo mass relation + stellar mass-size relation)
+        if priorDict['hern']: df = df.join(draw_hern(M_halos, df['zl'], **kwargs))
+        else:
+            df[need['hern']] = df_in[need['hern']].to_numpy(dtype=float)
+            df['mstar_nsig'], df['re_nsig'] = lookup_nsig(df) # sigma offsets (look-up coordinates)
         
         return df
     
     #> initial sample
-    df = sample(df)
+    df = sample(df, df_in)
+    df = autoscale(df, **kwargs)
     
-    srt = time.time()
-    df = lookup.firstLook_selFunc_v3(df, nph=nph, **interp_kw, **kwargs)
-    # print(time.time()-srt)
+    #> rejected galaxies w/ fixed masses can only be selected by redrawing their redshifts
+    fixed_mass = (not priorDict['nfw']) and (not priorDict['hern']) and (redraw is None)
+    nz = 0 # number of redshift redraws
     
     #> redraw rejected galaxies
     factor = 100
@@ -147,10 +92,22 @@ def sample_priors(numGals, priorDict, nph, **kwargs):
         #> rejected galaxies
         mask = ~df['sel']
         
+        #> redrawing varied params of the rejected galaxies (priors that are off)
+        df_in_resample = None
+        if df_in is not None:
+            if redraw is not None: df_in.loc[mask, :] = redraw(np.flatnonzero(mask))[df_in.columns].to_numpy()
+            df_in_resample = df_in.loc[mask].reset_index(drop=True)
+        
+        #> redrawing redshifts of rejected galaxies w/ fixed masses
+        zmask = mask & z_drawn
+        if fixed_mass and zmask.any():
+            df.loc[zmask, ['zl','zs']] = draw_redshifts(int(zmask.sum()), **(kwargs | {'redshifts': None})) # (only these galaxies)
+            nz += int(zmask.sum())
+        
         #> resampling at fixed redshifts
         df_resample = df.loc[mask,['zl','zs']].copy().reset_index(drop=True)
-        df_resample = sample(df_resample)
-        df_resample = lookup.firstLook_selFunc_v3(df_resample, nph=nph, **interp_kw, **kwargs)
+        df_resample = sample(df_resample, df_in_resample)
+        df_resample = autoscale(df_resample, **kwargs)
         
         #> replacing
         cols = df_resample.columns
@@ -158,18 +115,130 @@ def sample_priors(numGals, priorDict, nph, **kwargs):
         
         #> reducing tries
         tries -= 1
-        
+    
     #> checking if all lenses were accepted
     print(f'> Sampling priors took {maxTries*factor - tries} tries!')
+    if nz > 0:
+        error.highlight(f'Masses are fixed: redrew the redshifts of rejected galaxies {nz} time(s)')
     if any(~df['sel']):
         error.highlight(f'Could not find accepted samples for {sum(~df["sel"])} galaxies')
     
-    cols = ['zl', 'zs', 'd_area', 'pix_arc', 'ER']
-    # print(df[cols])
-    # print(df.to_string())
-    # df.to_csv('lookup.csv')
+    return df
+
+
+""" #> DRAW REDSHIFTS ================
+================================== """
+
+#> draws (zl, zs) for numGals galaxies; supplied redshifts are kept, None = drawn
+def draw_redshifts(numGals, **kwargs):
+    
+    #> kwargs
+    redshifts = kwargs.get('redshifts', None) # (numGals, 2) or (zl, zs) redshifts, None = drawn
+    
+    #> declarations
+    if redshifts is None: redshifts = np.full((numGals,2), None, dtype=object)
+    redshifts = np.array(redshifts, dtype=object).reshape(-1,2)
+    if len(redshifts) == 1: redshifts = np.tile(redshifts, (numGals,1)) # same (zl, zs) for every galaxy
+    no_zl = (redshifts[:,0] == None)
+    no_zs = (redshifts[:,1] == None)
+    
+    #> both redshifts missing --> drawn from the redshift distribution
+    both = no_zl & no_zs
+    if both.any(): redshifts[both] = drawRedshifts(int(both.sum()), **kwargs)
+    
+    #> only zl missing --> zl | zs
+    for i in np.flatnonzero(no_zl & ~no_zs):
+        redshifts[i,0] = conditional_redshifts(z=float(redshifts[i,1]), known='zs', **kwargs)
+    
+    #> only zs missing --> zs | zl
+    for i in np.flatnonzero(~no_zl & no_zs):
+        redshifts[i,1] = conditional_redshifts(z=float(redshifts[i,0]), known='zl', **kwargs)
+    
+    return redshifts.astype(float)
+
+
+""" #> DRAW NFW ======================
+================================== """
+
+#> draws halo masses (hmf) and concentrations (cmr) at lens redshifts zls (halo mass definition: mdef)
+def draw_nfw(zls, **kwargs):
+    
+    #> declarations
+    zls = np.asarray(zls, dtype=float)
+    
+    #> halo mass function
+    halom = halo_mass_fn(zls, **kwargs)        # solMass
+    
+    #> halo mass-concentration relation
+    haloc = mass_c_rel(halom, zls, **kwargs)   # concentration []
+    
+    #> (log10_M_vir & c_vir are the mdef halo mass & concentration)
+    df = pd.DataFrame({'log10_M_vir': np.log10(halom), # log10(solMass)
+                       'c_vir':       haloc})          # concentration []
+    df.attrs['M_halo'] = halom                         # solMass (exact, for draw_hern)
     
     return df
+
+
+""" #> DRAW HERN =====================
+================================== """
+
+#> draws stellar masses (shmr) and effective radii (msr) from halo masses M_halos [solMass] at zls
+def draw_hern(M_halos, zls, **kwargs):
+    
+    #> kwargs
+    msr_method = kwargs.get('msr_method', '18mowla') # what stellar mass-size relation to use
+    
+    #> declarations
+    msr_func = {'14wel':   mass_r_relation_14wel,   # MSR from 14 van der Wel+
+                '18mowla': mass_r_relation_18mowla, # MSR from 18 Mowla+
+                '25cook':  mass_r_relation_25cook}  # MSR from 25 Cook+
+    M_halos = np.asarray(M_halos, dtype=float)
+    zls     = np.asarray(zls, dtype=float)
+    
+    #> stellar-to-halo mass relation
+    mstar_nsig = np.random.normal(size=len(zls))
+    starm = stellar_h_mass_rel(M_virs=M_halos,  # array of halo masses
+                               zls=zls,         # array of lens redshifts
+                               nsig=mstar_nsig) # sigma offset
+    
+    #> stellar mass-size relation
+    re_nsig = np.random.normal(size=len(zls))
+    reffs = msr_func[msr_method](M_stars=starm, # array of stellar masses [solM]
+                                 zls=zls,       # array of lens redshifts
+                                 nsig=re_nsig)  # sigma offset
+    
+    return pd.DataFrame({'log10_M_star': np.log10(starm), # log10(solMass)
+                         'R_eff':        reffs,           # kpc
+                         'mstar_nsig':   mstar_nsig,      # sigma offset from the shmr
+                         're_nsig':      re_nsig})        # sigma offset from the msr
+
+
+""" #> AUTOSCALING ===================
+================================== """
+
+#> look-up einstein radius --> pix_arc [pix/arcsec] and selection (selDict) for galaxies in df
+#> df: zl, zs, log10_M_vir, log10_M_star, R_eff (+ mstar_nsig, re_nsig, otherwise calculated)
+def autoscale(df, **kwargs):
+    
+    #> sigma offsets (look-up coordinates) if not given
+    if 'mstar_nsig' not in df or 're_nsig' not in df:
+        df = df.copy()
+        df['mstar_nsig'], df['re_nsig'] = lookup_nsig(df)
+    
+    return lookup.firstLook_selFunc_v3(df, **kwargs)
+
+
+#> sigma offsets of M_star & R_eff from the shmr & 18mowla msr (the v3 look-up coordinates)
+def lookup_nsig(df):
+    
+    #> declarations
+    zls     = df['zl'].to_numpy(dtype=float)
+    M_halos = 10**df['log10_M_vir'].to_numpy(dtype=float)  # solMass
+    M_stars = 10**df['log10_M_star'].to_numpy(dtype=float) # solMass
+    R_effs  = df['R_eff'].to_numpy(dtype=float)            # kpc
+    
+    return shmr_nsig(M_stars, M_halos, zls), msr_nsig(R_effs, M_stars, zls)
 
 
 """ #> REDSHIFT ======================
@@ -503,7 +572,7 @@ def halo_mass_fn(zls, cosmo=u.cosmo, **kwargs):
     #> halo-mass function
     log10Mmin  = kwargs.get('hmf_log10Mmin', 11.5) # min log10(M/solM)
     log10Mmax  = kwargs.get('hmf_log10Mmax', 14.5) # max log10(M/solM)
-    mdef       = kwargs.get('hmf_mdef', 'vir')     # halo mass definition (200c, 200m, etc.)
+    mdef       = kwargs.get('mdef', 'vir')         # halo mass definition ('vir' or '200c')
     ngrid      = kwargs.get('hmf_ngrid', 4096)     # number grid
     
     #> declarations
@@ -518,12 +587,6 @@ def halo_mass_fn(zls, cosmo=u.cosmo, **kwargs):
     #> reduced hubble param
     h = ccosmo.H0 / 100
     
-    #> kwargs
-    log10Mmin = kwargs.get('log10Mmin', 11.5) # min log10(M/solM)
-    log10Mmax = kwargs.get('log10Mmax', 14.5) # max log10(M/solM)
-    mdef      = kwargs.get('mdef', 'vir')     # halo mass definition (200c, 200m, etc.)
-    ngrid     = kwargs.get('ngrid', 4096)     # number grid
-
     #> iterating through lens redshifts
     halom = np.zeros(len(zls))
     for i, zl in enumerate(zls):
@@ -539,7 +602,7 @@ def halo_mass_fn(zls, cosmo=u.cosmo, **kwargs):
         #> inverse-cdf sampling
         #> interps cdf based on U random #, with lnm values, then gets solM/h
         halom_h  = np.exp(np.interp(np.random.random(), cdf, lnm)) # solM/h
-        halom[i] = halom_h / h # log10(solMass)
+        halom[i] = halom_h / h # solMass
     
     return halom
 
@@ -587,10 +650,11 @@ def halo_cdf(zl, h, log10Mmin=11.5, log10Mmax=14.5, mdef='vir', ngrid=4096):
 ================================== """
 
 #> main mass-concentration relation
-def mass_c_rel(halom, zls, cosmo, **kwargs):
+def mass_c_rel(halom, zls, **kwargs):
     
     #> kwargs
-    mdef = kwargs.get('hmf_mdef', 'vir')
+    cosmo = kwargs.get('cosmo', u.cosmo) # cosmology
+    mdef  = kwargs.get('mdef', 'vir')    # halo mass definition ('vir' or '200c')
     
     #> for virial mass
     if mdef in ['vir']:
@@ -599,9 +663,9 @@ def mass_c_rel(halom, zls, cosmo, **kwargs):
                               cosmo=cosmo)  # cosmology
     
     #> for m 200
-    if mdef in ['200']:
+    if mdef in ['200c']:
         return mass_c_200_rel(M_200=halom,  # array of m200 halo masses
-                              zls=zls,      # array of lens redshifts
+                              zl=np.asarray(zls, dtype=float), # array of lens redshifts
                               cosmo=cosmo)  # cosmology
     
     #> if mdef not found
@@ -738,6 +802,19 @@ def stellar_h_mass_rel(M_virs, zls, **kwargs):
     
     #> returning logNorm params (must be requested)
     return np.array(logNorm_params)
+
+
+#> sigma offset of given stellar masses from the shmr (inverse of stellar_h_mass_rel)
+def shmr_nsig(M_stars, M_virs, zls):
+    
+    #> declarations
+    h_shuntov = 0.7 # reduced hubble param of 2022 Shuntov
+    
+    #> lognormal params (nsig=0 so no random draws)
+    p = stellar_h_mass_rel(M_virs, zls, return_sample=False, nsig=np.zeros(len(zls))).astype(float)
+    logM_star, sigma_logM = p[:,0], p[:,1] # log10(solMass/h_shuntov^2), dex
+    
+    return (np.log10(np.asarray(M_stars) * h_shuntov**2) - logM_star) / sigma_logM
 
 
 #> returns look up bins for the shmr
@@ -889,7 +966,8 @@ def mass_r_relation_25cook(M_stars, zls, morph='spheroid', **kwargs):
         #> sampling intrinsic size scatter
         if kwargs.get('sigma_log_R_eff', None) is not None:
             sigma_log_R_eff = kwargs.get('sigma_log_R_eff')
-        sample_log_R_eff = np.random.normal(logR_eff, sigma_log_R_eff)
+        draw = np.random.normal() if kwargs.get('nsig', None) is None else kwargs.get('nsig')[i]
+        sample_log_R_eff = logR_eff + draw*sigma_log_R_eff
         r_eff[i] = 10**(sample_log_R_eff) # kpc
     
     return r_eff
@@ -897,7 +975,10 @@ def mass_r_relation_25cook(M_stars, zls, morph='spheroid', **kwargs):
 
 #> stellar mass-size relation (half-light radius)
 #> taken from Eq. 3, Table 1 of 2014 Van der Wel
-def mass_r_relation_14wel(M_stars, zls):
+def mass_r_relation_14wel(M_stars, zls, **kwargs):
+    
+    #> kwargs
+    nsig = kwargs.get('nsig', None)
     
     #### TWO THINGS -- IS IT 5E10? AND NEW COEFFS FROM 2018 MOWLA -- CAN I USE?
     
@@ -922,7 +1003,8 @@ def mass_r_relation_14wel(M_stars, zls):
         mean_logR = logA + (alpha * np.log10(M_star/(5e10)) ) # log10(kpc)
         
         #> sampling intrinsic size scatter
-        sample_logR = np.random.normal(mean_logR, sigma_logR)
+        draw = np.random.normal() if nsig is None else nsig[i]
+        sample_logR = mean_logR + draw*sigma_logR
         
         #> converting to physical kpc
         r_eff[i] = 10**sample_logR
@@ -970,6 +1052,16 @@ def mass_r_relation_18mowla(M_stars, zls, **kwargs):
     return logNorm_params
 
 
+#> sigma offset of given effective radii from the 18mowla msr (inverse; the v3 look-up is built w/ 18mowla)
+def msr_nsig(R_effs, M_stars, zls):
+    
+    #> lognormal params (nsig=0 so no random draws)
+    p = np.array(list(mass_r_relation_18mowla(M_stars, zls, return_sample=False, nsig=np.zeros(len(zls)))), dtype=float)
+    mean_logR, sigma_logR = p[:,0], p[:,1] # log10(kpc), dex
+    
+    return (np.log10(np.asarray(R_effs)) - mean_logR) / sigma_logR
+
+
 #> stellar mass-size relation (half-mass radius)
 #> taken from Eq. 1, Table 3 of 2026 Xin
 def mass_r_relation_26xin(M_stars, zls):
@@ -994,29 +1086,23 @@ if __name__ == '__main__':
     print('> '+os.path.basename(__file__))
     
     #> imports
-    import sys
-    import plot
     import params
     
-    M_virs = np.array([1e12, 1e13])
-    zls = np.array([0.2, 0.6])
-    # df = pd.DataFrame([M_virs, zls], columns=[''])
-    # shmr_fromFile(M_virs, zls)
+    #> declarations
+    numgals = 10
+    np.random.seed(13)
     
-    # redshifts = assign_redshifts(100, method='2D')
-    # print(redshifts)
+    #> each step on its own
+    redshifts = draw_redshifts(numgals)                                  # (zl, zs)
+    nfw       = draw_nfw(redshifts[:,0], mdef='vir')                     # log10_M_vir, c_vir
+    hern      = draw_hern(10**nfw['log10_M_vir'], redshifts[:,0])        # log10_M_star, R_eff, nsigs
+    df        = pd.DataFrame(redshifts, columns=['zl', 'zs']).join(nfw).join(hern)
+    df        = autoscale(df, nph=50, selDict=params.getSelDict())       # ER, pix_arc, sel
+    print(df.to_string())
     
-    #> sampling
-    numgals = 100
-    nph = 50
-    zls = np.linspace(0.2, 1.0, numgals)
-    priorDict = params.getPriorDict(all=True)
-    df = sample_priors(numgals, priorDict, nph=nph, seed=13)
-    
-    # print(np.array2string(data, formatter={'float_kind': lambda x: f'{x:.2e}'}))
-    # plot.priors_correl(df, plot=True)
-    
-    sys.exit()
+    #> everything together
+    df = sample_priors(numgals, priorDict=params.getPriorDict(all=True), nph=50, seed=13)
+    print(df.to_string())
     
     # end
 # thank

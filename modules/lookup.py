@@ -301,6 +301,30 @@ def plot_lookup(df):
 """ #> V3 LOOK-UP TABLES =============
 ================================== """
 
+#> v3 look-up tables for each halo mass definition
+lookup_locs_v3   = {'vir':  './priors/look_up_tables_v3_vir/',   # nfw w/ delta_vir   (not generated yet)
+                    '200c': './priors/look_up_tables_v3_200c/'}  # nfw w/ delta = 200 (not generated yet)
+lookup_legacy_v3 = './priors/look_up_tables_v3/'                 # original v3 tables (delta = 200, c from the c_vir relation)
+
+#> look-up directory for a halo mass definition (falls back to the original v3 tables if not generated)
+def lookup_dir_v3(mdef='vir'):
+    
+    #> checking mdef
+    if mdef not in lookup_locs_v3:
+        import modules.error as error
+        error.phrase(f"mdef={mdef} not understood. Please use 'vir' or '200c'")
+    
+    #> tables for mdef
+    if os.path.isfile(os.path.join(lookup_locs_v3[mdef], 'lookup_grid_v3.json')): return lookup_locs_v3[mdef]
+    
+    #> fallback (warns once per mdef)
+    if mdef not in lookup_dir_v3.warned:
+        import modules.error as error
+        error.highlight(f'No v3 look-up tables for mdef={mdef} in {lookup_locs_v3[mdef]}; using {lookup_legacy_v3} (delta=200, c_vir)')
+        lookup_dir_v3.warned.add(mdef)
+    return lookup_legacy_v3
+lookup_dir_v3.warned = set()
+
 #> loads v3 look-up bins
 @lru_cache(maxsize=1)
 def load_lookup_grid_v3(loc='./priors/look_up_tables_v3/'):
@@ -389,7 +413,7 @@ def firstLook_selFunc_v3(df, **kwargs):
     ER_resolution = kwargs.get('ER_resolution', 0.15)
     nph = kwargs.get('nph', 50)
     r_pix_percentage = kwargs.get('r_pix_percentage', 0.5)
-    loc = kwargs.get('lookup_loc','./priors/look_up_tables_v3/')
+    loc = kwargs.get('lookup_loc', lookup_dir_v3(kwargs['mdef']) if 'mdef' in kwargs else lookup_legacy_v3)
 
     #> interpolation
     interp_zl    = kwargs.get('interp_zl',   False)
@@ -462,9 +486,16 @@ def firstLook_selFunc_v3(df, **kwargs):
     df['p_quad'] = p_quad
     df['pix_arc'] = pix_arc
 
-    #> selection
-    sel_res = kwargs.get('sel_res', True)
-    sel_slcs = kwargs.get('sel_slcs', True)
+    #> selection (selDict from params.getSelDict, otherwise the older sel_res / sel_slcs kwargs)
+    selDict = kwargs.get('selDict', None) or {'res':  {'on': kwargs.get('sel_res', True), 'ER_resolution': ER_resolution},
+                                              'slcs': {'on': kwargs.get('sel_slcs', True)}}
+    sel_res = selDict['res']['on']
+    sel_slcs = selDict['slcs']['on']
+    ER_resolution = selDict['res'].get('ER_resolution', ER_resolution)
+    
+    #> no selection
+    if not sel_res and not sel_slcs:
+        df['sel'] = np.ones(len(df), dtype=bool)
     
     #> selection effects
     if sel_res and sel_slcs:

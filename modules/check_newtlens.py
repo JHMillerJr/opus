@@ -12,6 +12,11 @@ import contextlib
 import numpy as np
 from matplotlib.path import Path
 
+#> import file path
+import os
+import sys
+sys.path.append(os.path.dirname(__file__)) 
+
 #> modules (run from the opus directory)
 import params
 import generate
@@ -189,7 +194,7 @@ def rate_table(name, vals, fail, edges, fmt):
 if __name__ == '__main__':
 
     #> declarations
-    numGals   = 100                                         # galaxies
+    numGals   = 10                                         # galaxies
     numUni    = 500                                        # uniform sources inside the caustic per galaxy
     numNear   = 500                                        # near-caustic sources per galaxy
     nph       = 50                                         # test grid half-width [pix]

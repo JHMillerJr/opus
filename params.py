@@ -36,8 +36,8 @@ def paramRanges():
                       'y0':            {'init':  0.0, 'min':-0.1, 'max':0.1, 'fit': False},   # y center of profile
                       'logmass':       {'init':   13, 'min':  10, 'max': 14, 'fit': False},   # log_10(M) [solMass]
                       'concentration': {'init':    7, 'min':   2, 'max': 10, 'fit': False},   # concentration []
-                      'axisrat':       {'init': 0.85, 'min': 0.5, 'max':0.95,'fit': False},    # axis ratio []
-                      'theta':         {'init':  0.0, 'min': 0.0, 'max':90.0,'fit': False},    # position angle [deg]
+                      'axisrat':       {'init': 0.85, 'min': 0.5, 'max':0.95,'fit': False},   # axis ratio []
+                      'theta':         {'init':  0.0, 'min': 0.0, 'max':90.0,'fit': False},   # position angle [deg]
                       'add': True}],
               'hern': [ # hern
                       {'name': 'p02',
@@ -135,15 +135,26 @@ def toggleParams(paramDict, ranges=None):
 ================================== """
 
 #> returns prior dictionary (if drawing from priors)
-def getPriorDict(hmf=False, cmr=False, shmr=False, msr=False, red=False, **kwargs):
+def getPriorDict(nfw=False, hern=False, red=False, **kwargs):
+    
+    #> modules
+    import modules.error as error
     
     #> kwargs
     all_ = kwargs.get('all', None)
     
+    #> older individual keys (hmf & cmr --> nfw, shmr & msr --> hern; must be turned on/off together)
+    for group, keys in {'nfw': ['hmf', 'cmr'], 'hern': ['shmr', 'msr']}.items():
+        old = [kwargs[k] for k in keys if k in kwargs]
+        if len(old) == 0: continue
+        if len(old) == 1 or old[0] != old[1]: error.phrase(f'{keys[0]} and {keys[1]} must be turned on/off together (use {group}=)')
+        if group == 'nfw': nfw = nfw or old[0]
+        if group == 'hern': hern = hern or old[0]
+    
     #> default if drawing from priors
-    priorDict = {'hmf' :  hmf, 'cmr': cmr,
-                 'shmr': shmr, 'msr': msr,
-                 'red': red}
+    priorDict = {'nfw' : nfw,  # halo mass function (hmf) + mass-concentration relation (cmr)
+                 'hern': hern, # stellar-to-halo mass relation (shmr) + mass-size relation (msr)
+                 'red' : red}  # redshift distribution
     
     #> setting all
     if all_ is not None:
@@ -151,6 +162,25 @@ def getPriorDict(hmf=False, cmr=False, shmr=False, msr=False, red=False, **kwarg
             priorDict[key] = all_
     
     return priorDict
+
+
+#> returns selection dictionary (which selection effects reject galaxies when drawing from priors)
+def getSelDict(res=True, slcs=True, **kwargs):
+    
+    #> kwargs
+    all_          = kwargs.get('all', None)            # sets every selection effect
+    ER_resolution = kwargs.get('ER_resolution', 0.15)  # min einstein radius [arcsec]
+    
+    #> selection effects
+    selDict = {'res' : {'on': res,  'ER_resolution': ER_resolution}, # resolution: ER >= ER_resolution & finite
+               'slcs': {'on': slcs}}                                 # quad cross section: random < d_area/d_area_max
+    
+    #> setting all
+    if all_ is not None:
+        for key in selDict:
+            selDict[key]['on'] = all_
+    
+    return selDict
 
 
 #> returns batch profiles for deflections based on parameter ranges
@@ -161,16 +191,16 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
     seed = kwargs.get('seed', None)
     
     #> changing varied params based on priors
-    priorLocs = {'hmf' : {'prof':  'nfw', 'param':       'logmass', 'sample':  'log10_M_vir'},
-                 'cmr' : {'prof':  'nfw', 'param': 'concentration', 'sample':        'c_vir'},
-                 'shmr': {'prof': 'hern', 'param':       'logmass', 'sample': 'log10_M_star'},
-                 'msr' : {'prof': 'hern', 'param':        'effrad', 'sample':        'R_eff'},}
+    priorLocs = {'hmf' : {'prof':  'nfw', 'param':       'logmass', 'sample':  'log10_M_vir', 'group':  'nfw'},
+                 'cmr' : {'prof':  'nfw', 'param': 'concentration', 'sample':        'c_vir', 'group':  'nfw'},
+                 'shmr': {'prof': 'hern', 'param':       'logmass', 'sample': 'log10_M_star', 'group': 'hern'},
+                 'msr' : {'prof': 'hern', 'param':        'effrad', 'sample':        'R_eff', 'group': 'hern'},}
     
     #> iterating thru priors
     priorDict = kwargs.get('priorDict', getPriorDict())
     if any(priorDict.values()):      # if there is at least one prior
-        for key in priorDict.keys(): # iterating thru each prior
-            if not priorDict[key] or key in ['red']: continue # if not used, continue
+        for key in priorLocs.keys(): # iterating thru each prior
+            if not priorDict[priorLocs[key]['group']]: continue # if not used, continue
             for prof in ranges[priorLocs[key]['prof']]:
                 prof[priorLocs[key]['param']]['fit'] = False
                 prof[priorLocs[key]['param']]['init'] = 0.0
@@ -183,10 +213,16 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
     uniform = kwargs.get('uniform', False)
     cosmo = kwargs.get('cosmo', u.cosmo)
     
+    #> halo mass definition (nfw density contrast, hmf, cmr, & look-up tables): 'vir' or '200c'
+    mdef = kwargs.get('mdef', 'vir' if priorDict['nfw'] else '200c')
+    if mdef not in ['vir', '200c']:
+        import modules.error as error
+        error.phrase(f"mdef={mdef} not understood. Please use 'vir' or '200c'")
+    
     #> checking
     redshifts = kwargs.get('redshifts', None)
     if (redshifts is None) and (not priorDict['red']):
-        redshifts = np.array([ranges['zl'], ranges['zs']]).reshape(1,2)
+        redshifts = np.tile([ranges['zl'], ranges['zs']], (numGals,1)) # same (zl, zs) for every galaxy
     
     #> number of varied parameters
     d = len(varied_params) # num dims
@@ -252,9 +288,34 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
         
         #> drawing from priors
         import priors # importing priors
-        nph = kwargs.get('nph', u.nph)
-        kwargs_priors = {k:v for k,v in kwargs.items() if k not in ['nph','priorDict']}
-        df = priors.sample_priors(numGals, priorDict, nph, **kwargs_priors)
+        import pandas as pd
+        import modules.error as error
+        
+        #> galaxy values of the prior inputs whose priors are off (sampled or fixed paramRanges)
+        def prior_inputs(inds):
+            cols = {}
+            for key in priorLocs:
+                if priorDict[priorLocs[key]['group']]: continue
+                prof, param, col = priorLocs[key]['prof'], priorLocs[key]['param'], priorLocs[key]['sample']
+                if len(ranges[prof]) == 0: error.phrase(f'{prof} priors are off, but there is no {prof} profile to take {param} from')
+                j = [k for k, p in enumerate(varied_params) if p[0] == prof and p[1] == 0 and p[2] == param]
+                cols[col] = samples[j[0]][inds] if j else np.full(len(inds), float(ranges[prof][0][param]))
+            return pd.DataFrame(cols)
+        
+        #> redraws the varied params of rejected galaxies (only if a prior input is varied)
+        def redraw(inds):
+            if not uniform: samples[:, inds] = np.array(tmvn.sample(len(inds)))
+            else: samples[:, inds] = np.random.uniform(low=lb, high=ub, size=(len(inds), d)).T
+            return prior_inputs(inds)
+        varied_inputs = [p for p in varied_params if any((not priorDict[v['group']]) and p[0] == v['prof'] and p[1] == 0 and p[2] == v['param']
+                                                         for v in priorLocs.values())]
+        
+        #> sampling (kwargs passed thru; updated w/ the values set here)
+        df = priors.sample_priors(numGals, **(kwargs | {'priorDict': priorDict,                                 # what to draw
+                                                        'redshifts': redshifts,                                 # (numGals, 2) or None
+                                                        'mdef':      mdef,                                      # halo mass definition
+                                                        'df_in':     prior_inputs(np.arange(numGals)),          # values for priors that are off
+                                                        'redraw':    redraw if len(varied_inputs) else None}))  # redraws rejected galaxies
 
         #> overwriting redshifts & pix_arc
         redshifts = df[['zl', 'zs']].to_numpy()
@@ -276,8 +337,8 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
             
         #> iterating thru priors
         if any(priorDict.values()):      # if there is at least one prior
-            for key in priorDict.keys(): # iterating thru each prior
-                if not priorDict[key] or key in ['red']: continue # if not used, continue
+            for key in priorLocs.keys(): # iterating thru each prior
+                if not priorDict[priorLocs[key]['group']]: continue # if not used, continue
                 for prof in ranges[priorLocs[key]['prof']]:
                     prof[priorLocs[key]['param']] = df.loc[i][priorLocs[key]['sample']]
         
@@ -298,9 +359,9 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
         #> nfw: logmass, rhoc(z), c --> radius; rhoc(z), c --> rho0
         for prof in ranges.get('nfw', []):
             
-            #> getting density contrast if priors are used
-            mdef = kwargs.get('hmf_mdef', 'vir')
-            if (priorDict.get('hmf') or priorDict.get('cmr')) and mdef == 'vir':
+            #> density contrast from the halo mass definition
+            if mdef == 'vir':
+                import priors
                 delta = priors.densityContrast(ranges['zl'], cosmo=cosmo)
             else:
                 delta = 200.
