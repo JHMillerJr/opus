@@ -506,6 +506,79 @@ def lensObs(origin, images, observables):
     return lens_obs
 
 
+""" #> QUAD OBS ======================
+================================== """
+
+#> lensing observables
+def quad_obs(ims, observables):
+    
+    #> declarations
+    o = (0., 0.) # origin
+    
+    #> separates into images 1, 2, etc.
+    p = [ ims[:,k] for k in range(4) ]
+    
+    #>>># EQUATIONS #<<<#
+    
+    #> polar angle of vector [0, 360), +x-axis=0, ccw+
+    th   = lambda v: np.degrees(np.arctan2(v[:,1], v[:,0])) % 360
+    
+    #> ccw angle between two anlges a & b [0, 360)
+    ccw  = lambda a, b: (b - a) % 360
+    
+    #> distance between two vectors v & u
+    dist = lambda v, u: np.hypot(*(v - u).T)
+    
+    #> angle between point a & b, to contain point c
+    def contain(pa, pb, pc):
+        a, b, c = th(pa), th(pb), th(pc)
+        ab, ac  = ccw(a, b), ccw(a, c)
+        return np.where(ac <= ab, ab, 360 - ab) # ab if contain, else 360 - ab
+    
+    #> returns angle [deg] between two vectors
+    def ang(v1, v2):
+        cos = np.sum(v1*v2, axis=1) / (dist(v1,o) * dist(v2,o))
+        return np.degrees(np.arccos(np.clip(cos, a_min=-1, a_max=1)))
+    
+    
+    #>>># CALC OBSERVABLES #<<<#
+    
+    #> angles [deg]
+    t12 = contain(p[0], p[1], p[2]) # contains image 3, [0, 360), [0, ~180]
+    t23 = ang(p[1], p[2])           #                   [0, 180], [0, ~90]
+    t34 = contain(p[2], p[3], p[1]) # contains image 2  [0, 360), [0, ~180]
+    
+    #> FSQ (Woldesenbet & Williams 2012, eq 18)
+    a = np.radians(t12) 
+    b = np.radians(t34)
+    t23_fsq = ( -5.792 + (1.783 * a) + (0.1648 * a**2) - (0.04591 * a**3)
+              - (0.0001486 * a**4) + (1.784 * b) - (0.7275 * b * a)
+              + (0.0549 * b * a**2) + (0.01487 * b * a**3) + (0.1643 * b**2)
+              + (0.05493 * b**2 * a) - (0.03429 * b**2 * a**2) - (0.04579 * b**3)
+              + (0.01487 * b**3 * a) - (0.0001593 * b**4) )
+    dt23 = t23 - np.degrees(t23_fsq)
+    
+    #> distances [arcsec]
+    d = {f'd0{k+1}': dist(p[k], o) for k in range(4)}
+    d |= {'d13': dist(p[0], p[2]), 
+          'd14': dist(p[0], p[3]),
+          'd23': dist(p[1], p[2]), 
+          'd24': dist(p[1], p[3])}
+    
+    #> collecting all observables
+    data = {'t12': t12, 't23': t23, 't34': t34, 'dt23': dt23,
+            'd2/d1': d['d02']/d['d01'], 'd3/d1': d['d03']/d['d01'],
+            'd4/d1': d['d04']/d['d01'], 'd3/d2': d['d03']/d['d02']} | d
+    
+    #> saving image positions
+    for i in range(5): 
+        data[f'x{i+1}'] = ims[:,i,0] # xi
+        data[f'y{i+1}'] = ims[:,i,1] # yi
+    
+    #> reshaping and returning
+    return np.column_stack([data[x] for x in observables]) # (Q, numObs)
+
+
 """ #> PLOTTING ======================
 ================================== """
 

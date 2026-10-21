@@ -537,7 +537,7 @@ def find_images(xg, yg, bx_g, by_g, srcs, bprof, **kwargs):
     bx_g, by_g [np.ndarray]: (Ny, Nx) source-plane map beta = theta - alpha [arcsec]
     srcs       [np.ndarray]: (S, 2) sources [arcsec]
     bprof      [dict]      : galaxy profile
-    returns: dict w/ images (S, jmax, 2) [arcsec], mu (S, jmax) [signed], nims (S,)
+    returns: dict w/ images (S, jw, 2) [arcsec], mu (S, jw) [signed], nims (S,), flag (S,) [nims > jmax]; jw = max(jmax, nims.max())
     """
 
     #> unpacking kwargs
@@ -547,7 +547,7 @@ def find_images(xg, yg, bx_g, by_g, srcs, bprof, **kwargs):
     tol       = kwargs.get('tol', 1e-9)        # convergence on step size [arcsec]
     tol_res   = kwargs.get('tol_res', 1e-7)    # accepted lens-eq residual [arcsec]
     tol_merge = kwargs.get('tol_merge', 1e-5)  # duplicate roots closer than this are merged [arcsec]
-    jmax      = kwargs.get('jmax', 5)          # images kept per source
+    jmax      = kwargs.get('jmax', 5)          # expected max images per source (min array width)
 
     #> declarations
     nsrcs   = len(srcs)                        # number of sources (S)
@@ -562,7 +562,7 @@ def find_images(xg, yg, bx_g, by_g, srcs, bprof, **kwargs):
     #  1. backprojects and creates beta cells
     #  2. creates source box containing ALL sources in the source plane
     #  3. prune beta cells that do not overlap with the source box (i.e., do not contain a source)
-    #  4. seed cells that contain a source
+    #  4. seed lens-plane cells that contain a source
 
     #> creates source-plane box of every grid cell
     def cell_minmax(b):
@@ -611,7 +611,11 @@ def find_images(xg, yg, bx_g, by_g, srcs, bprof, **kwargs):
     #>>># 1. NEWTON ON BILINEAR GRID #<<<#
     
     #> steps
-    #  1. 
+    #  1. interpolate each seeds source-plane grid
+    #  2. calculate newton step
+    #  3. dampen step if needed (max 1 cell length)
+    #  4. iterate nit1 times
+    #  5. merge seeds of the same source if closer than a quarter of a cell 
 
     #> beta at the 4 corners of each seed's current cell
     def corners(b): return b[jy,jx], b[jy,jx+1], b[jy+1,jx], b[jy+1,jx+1]
@@ -675,6 +679,13 @@ def find_images(xg, yg, bx_g, by_g, srcs, bprof, **kwargs):
 
     #>>># 2. NEWTON ON ANALYTIC DEFLECTIONS #<<<#
 
+    #> steps
+    #  1. calculate initial deflect + jacobian of each seed analytically
+    #  2. calculate newton step
+    #  3. dampen step if needed (max 3 cell lengths)
+    #  4. backtrack (i.e., halve step) until decrease found
+    #  5. iterate until converged, stalled, or no decrease found
+
     #> deflections + jacobian at each seed position (x,y)
     ax, ay, axx, axy, ayx, ayy = alpha_jac_points(x, y, bprof)
 
@@ -706,7 +717,7 @@ def find_images(xg, yg, bx_g, by_g, srcs, bprof, **kwargs):
         sy = (-c*rx[ia] + a*ry[ia]) / det                    # arcsec
         step = np.hypot(sx, sy)
 
-        #> damping step size, length capped at maxstep (3) pixels
+        #> dampening step size, length capped at maxstep (3) pixels
         lam = np.minimum(1.0, maxstep*arc_pix / np.maximum(step, 1e-300))
 
         #> backtracking, halving the step until the residual decreases (max 8 halvings)
@@ -761,22 +772,32 @@ def find_images(xg, yg, bx_g, by_g, srcs, bprof, **kwargs):
     #> number of images per source
     nims = np.bincount(sidx, minlength=nsrcs)
 
+    #> flagging sources w/ more than jmax images (rare, but possible for complicated lenses)
+    flag = nims > jmax
+    if flag.any(): error.highlight(f'{flag.sum()} source(s) have more than {jmax} images (max = {nims.max()})! sidx = {np.flatnonzero(flag)}')
+
+    #> array width, grown so no image is dropped
+    jw = max(jmax, nims.max(initial=0))                      # images per source
+
     #> grouping roots by source
     order = np.argsort(sidx, kind='stable')
     sidx, x, y, detA = sidx[order], x[order], y[order], detA[order]
 
-    #> slot of each root within its source (0, 1, 2, ...); only the first jmax are kept
+    #> slot of each root within its source (0, 1, 2, ...)
     slot = np.arange(len(sidx)) - np.repeat(np.cumsum(nims) - nims, nims)
-    keep = slot < jmax
 
-    #> filling (S, jmax) arrays
-    ims = np.full((nsrcs, jmax, 2), np.nan)                  # arcsec
-    mu  = np.full((nsrcs, jmax), np.nan)                     # signed mags
-    ims[sidx[keep], slot[keep], 0] = x[keep]
-    ims[sidx[keep], slot[keep], 1] = y[keep]
-    mu[sidx[keep], slot[keep]] = 1/detA[keep]
+    #> filling (S, jw) arrays
+    ims = np.full((nsrcs, jw, 2), np.nan)                    # arcsec
+    mu  = np.full((nsrcs, jw), np.nan)                       # signed mags
+    ims[sidx, slot, 0] = x
+    ims[sidx, slot, 1] = y
+    mu[sidx, slot]     = 1/detA
 
-    return {'images': ims, 'mu': mu, 'nims': nims} # arcsec, signed mags, counts
+    return {'images': ims, 'mu': mu, 'nims': nims, 'flag': flag} # arcsec, signed mags, counts, bool
+
+
+#> pads (S, j, ...) arrays w/ nans along axis=1 to width w
+def _pad(a, w): return np.concatenate([a, np.full((a.shape[0], w - a.shape[1], *a.shape[2:]), np.nan)], axis=1)
 
 
 #> merges points of the same source closer than tol
@@ -1075,7 +1096,7 @@ def lens_galaxy(bprof, numSource, nph=50, rng=None, **kwargs):
             
             #> filling requested data with nans
             out = {'images': np.full((numSource, 5, 2), np.nan), 'mu':   np.full((numSource, 5), np.nan),
-                   'srcs':   np.full((numSource, 2), np.nan),    'nims': np.zeros(numSource, dtype=int)}
+                   'srcs':   np.full((numSource, 2), np.nan),    'nims': np.zeros(numSource, dtype=int), 'flag': np.zeros(numSource, dtype=bool)}
             out['delays'] = np.full((numSource, 5), np.nan)                     # days
             if observables is not None: out['obs'] = np.full((numSource, len(observables)), np.nan)
             error.highlight(f'Caustic does not exist! bprof={bprof}')
@@ -1097,6 +1118,8 @@ def lens_galaxy(bprof, numSource, nph=50, rng=None, **kwargs):
             #> redraws bad sources + replaces
             srcs[bad] = sample_sources(caus, len(bad), rng=rng)
             new_res = find_images(xg, yg, bxg, byg, srcs[bad], bprof)
+            w = max(res['mu'].shape[1], new_res['mu'].shape[1])
+            for i in ['images', 'mu']: res[i], new_res[i] = _pad(res[i], w), _pad(new_res[i], w)
             for i in res: res[i][bad] = new_res[i]
             
     else: #> if sources are provided
@@ -1122,18 +1145,24 @@ def lens_galaxy(bprof, numSource, nph=50, rng=None, **kwargs):
     if method == 'lpot':
         
         #> returns imgaes and mags in fermat order
-        o_ims, o_mu, tau = fermat_order(ims[quad], mu[quad], srcs[quad], bprof)
+        o_ims, o_mu, tau = fermat_order(ims[quad][:,:5], mu[quad][:,:5], srcs[quad], bprof)
         
         #> gets time delays
         D_dt = (1 + bprof['zl']) * (4 * np.pi * u.G_kpc_solMass) * bprof['angDist']**2 * bprof['sigCrit'] / u.c_kpc**2 # kpc
-        out['delays'][quad] = D_dt / u.c_kpc * (tau - tau[:,:1]) / 86400 # days
+        out['delays'][quad,:5] = D_dt / u.c_kpc * (tau - tau[:,:1]) / 86400 # days
     
     else: #> if only using deflection angles (morphological order)
-        o_ims, o_mu = morph_order(ims[quad], mu[quad])
+        o_ims, o_mu = morph_order(ims[quad][:,:5], mu[quad][:,:5])
         
     #> saving images and mags
-    out['images'][quad] = o_ims
-    out['mu'][quad]     = o_mu
+    out['images'][quad,:5] = o_ims
+    out['mu'][quad,:5]     = o_mu
+
+    #> raw (unordered) images and mags of sources w/ more than jmax images
+    flag = res['flag']
+    out['images'][flag] = ims[flag]
+    out['mu'][flag]     = mu[flag]
+    out['flag']         = flag                                 # True if > jmax images
     
     #> observables
     if observables is not None:
@@ -1168,6 +1197,7 @@ if __name__ == '__main__':
     #> galaxies
     galProf     = generate.galProfiles(nfw=True, hern=True, mult=[1,3,4], ex=True)
     paramRanges = params.toggleParams(galProf)
+    paramRanges['mult'][2]['norm']['init'] = 0.1
     bprofiles   = params.bprofiles(numGals, ranges=paramRanges, redshifts=np.tile((0.5, 1.0), (numGals, 1)))
     
     #> lensing!

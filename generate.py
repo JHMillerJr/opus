@@ -825,6 +825,146 @@ def saveInfo_multipleFiles(dirPath, fileName, suffix, **kwargs):
     return
 
 
+""" #> NEWT ==========================
+================================== """
+
+#> lenses numSource sources behind one galaxy (all vectorized, newton method)
+def genQuadNewt(bprof, numSource, nph=50, rng=None, **kwargs):
+
+    #> modules
+    import profiles
+    import newtlens
+    import order
+    
+    #> unpacking kwargs
+    method      = kwargs.get('method', 'deflect')   # 'deflect' (morph order) or 'lpot' (fermat order + delays)
+    observables = kwargs.get('observables', None)   # list of lenisng observables
+    srcs        = kwargs.get('srcs', None)          # supplied sources [arcsec] (otherwise random in caustic)
+    maxRedraw   = kwargs.get('maxRedraw', 10)       # redraw rounds for non-quads
+    if rng is None: rng = np.random
+    
+    #> declarations
+    pix_arc = bprof['pix_arc']
+    
+    
+    #>>># CREATING GALAXY #<<<#
+    
+    #> lens-plane grid (theta)
+    w = np.arange(-nph, nph, 1, dtype=float) / pix_arc
+    xg, yg = np.meshgrid(w, w)
+    
+    #> deflection angles + beta
+    ax, ay   = profiles.alpha_points(xg, yg, bprof)    # arcsec
+    bxg, byg = xg - ax, yg - ay               # beta_i = theta_i - alpha_i [arcsec]
+    
+    
+    #>>># LENSING #<<<#
+    
+    #> sources
+    if srcs is None:
+        
+        #> calculating tangential caustic
+        axy_, axx_ = np.gradient(ax, w, w)
+        ayy_, ayx_ = np.gradient(ay, w, w)
+        kappa   = 0.5*(axx_ + ayy_) 
+        gamma1  = 0.5*(axx_ - ayy_)
+        gamma2  = 0.5*(axy_ + ayx_)
+        lamt = 1 - kappa - np.hypot(gamma1, gamma2)
+        caus = newtlens.caustic_points(xg, yg, bprof, lamt)
+        
+        #> no critical curve
+        if caus is None:
+            
+            #> filling requested data with nans
+            out = {'images': np.full((numSource, 5, 2), np.nan), 'mu':   np.full((numSource, 5), np.nan),
+                   'srcs':   np.full((numSource, 2), np.nan),    'nims': np.zeros(numSource, dtype=int), 'flag': np.zeros(numSource, dtype=bool)}
+            out['delays'] = np.full((numSource, 5), np.nan)                     # days
+            if observables is not None: out['obs'] = np.full((numSource, len(observables)), np.nan)
+            error.highlight(f'Caustic does not exist! bprof={bprof}')
+            return out
+        
+        #> drawing sources inside the caustic
+        srcs = newtlens.sample_sources(caus, numSource, rng=rng)
+        
+        #> lensing!
+        res = newtlens.find_images(xg, yg, bxg, byg, srcs, bprof)
+        
+        #> redrawing non-quads
+        nEven = 0                                       # redraws caused by an even image count (missed image)
+        for _ in range(maxRedraw):
+            
+            #> finds non-quads
+            bad = np.flatnonzero(res['nims'] != 5)
+            if len(bad) == 0: break #> all quads
+            
+            #> counting even-count failures
+            nEven += int(np.sum(res['nims'][bad] % 2 == 0))
+            
+            #> redraws bad sources + replaces
+            srcs[bad] = newtlens.sample_sources(caus, len(bad), rng=rng)
+            new_res = newtlens.find_images(xg, yg, bxg, byg, srcs[bad], bprof)
+            w = max(res['mu'].shape[1], new_res['mu'].shape[1])
+            for i in ['images', 'mu']: res[i], new_res[i] = newtlens.pad(res[i], w), newtlens.pad(new_res[i], w)
+            for i in res: res[i][bad] = new_res[i]
+        
+        #> printing even-count failures
+        if nEven > 0: print(f'> {nEven} redraw(s) were even-count failures (missed images)')
+            
+    else: #> if sources are provided
+        srcs = np.asarray(srcs, dtype=float)
+        res = newtlens.find_images(xg, yg, bxg, byg, srcs, bprof)
+        
+        
+    #>>># LENSING OBSERVABLES #<<<#
+    
+    #> declarations
+    ims  = res['images']     # image positions [arcsec]
+    mu   = res['mu']         # image magnifications
+    quad = res['nims'] == 5  # quad mask
+    
+    #> out dictionary (fills with nans if needed)
+    out = {'images': np.full_like(ims, np.nan), 
+           'mu':     np.full_like(mu, np.nan),
+           'srcs':   srcs,                      # sources
+           'nims':   res['nims'],               # number of images
+           'delays': np.full_like(mu, np.nan)}  # time delays [days] (nan for deflect)
+    
+    #> if using lens potential (fermat order)
+    if method == 'lpot':
+        
+        #> returns imgaes and mags in fermat order
+        o_ims, o_mu, tau = order.fermat_order(ims[quad][:,:5], mu[quad][:,:5], srcs[quad], bprof)
+        
+        #> gets time delays
+        D_dt = (1 + bprof['zl']) * (4 * np.pi * u.G_kpc_solMass) * bprof['angDist']**2 * bprof['sigCrit'] / u.c_kpc**2 # kpc
+        out['delays'][quad,:5] = D_dt / u.c_kpc * (tau - tau[:,:1]) / 86400 # days
+    
+    else: #> if only using deflection angles (morphological order)
+        o_ims, o_mu = order.morph_order(ims[quad][:,:5], mu[quad][:,:5])
+        
+    #> saving images and mags
+    out['images'][quad,:5] = o_ims
+    out['mu'][quad,:5]     = o_mu
+
+    #> raw (unordered) images and mags of sources w/ more than jmax images
+    flag = res['flag']
+    out['images'][flag] = ims[flag]
+    out['mu'][flag]     = mu[flag]
+    out['flag']         = flag                                 # True if > jmax images
+
+    #> fermat orders all images of sources w/ more than jmax images (not passed to morph_order)
+    if method == 'lpot' and flag.any():
+        out['images'][flag], out['mu'][flag], f_tau = order.fermat_order(ims[flag], mu[flag], srcs[flag], bprof)
+        out['delays'][flag] = np.where(np.isinf(f_tau), np.nan, D_dt / u.c_kpc * (f_tau - f_tau[:,:1]) / 86400) # days
+    
+    #> observables
+    if observables is not None:
+        out['obs'] = np.full((len(srcs), len(observables)), np.nan)
+        out['obs'][quad] = geometry.quad_obs(o_ims, observables)
+    
+    return out
+
+
 """ #> MAIN ==========================
 ================================== """
 
