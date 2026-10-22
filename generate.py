@@ -61,10 +61,12 @@ def getSaveDict(atleast_one_save=True, **kwargs):
                 'im_mags': kwargs.get('im_mags', False),
                 'delays': kwargs.get('delays', False), 
                 'sources': kwargs.get('sources', True),
-                'lens': kwargs.get('lens', False), 
                 'bprofiles': kwargs.get('bprofiles', True),
                 'csv': kwargs.get('csv', True),
-                'paramRanges': kwargs.get('paramRanges', True)}
+                'paramRanges': kwargs.get('paramRanges', True),
+                'nims': kwargs.get('nims', True),       # number of images per source
+                'flag': kwargs.get('flag', True),       # true if nims > jmax
+                'gal': kwargs.get('gal', True)}         # galaxy index (into bprofiles) of each source
     
     #> making all false if wanted
     if not atleast_one_save:
@@ -130,8 +132,9 @@ def galProfiles(nfw=True, hern=True, mult=[1,3,4], ex=True):
 """ #> SAVING ========================
 ================================== """
 
-#> saves info to outfile
-def saveInfo(dirPath, fileName, suffix, out, **kwargs):
+#> saves the output of gen() (stacked or split by galaxy)
+#> data/<folder>/<fileName>/<fileName>_<key>.npy, fileName = yymmddHHMM + ms + suffix
+def save(out, **kwargs):
     
     #> globals
     global maxTries
@@ -140,42 +143,57 @@ def saveInfo(dirPath, fileName, suffix, out, **kwargs):
     #> imports
     from pathlib import Path
     
-    #> adding / if needed
-    if dirPath[-1]  != '/': dirPath  += '/'
-    if fileName[-1] != '/': fileName += '/'
+    #> kwargs
+    saveDict    = kwargs.get('saveDict', getSaveDict())   # what to save
+    folder      = kwargs.get('folder', '+unsorted')       # data output folder (inside dataDir)
+    suffix      = kwargs.get('suffix', '')                # suffix to file name
+    parent_dir  = kwargs.get('parent_dir', '')            # parent dir where the data folder is
+    paramRanges = kwargs.get('paramRanges', None)         # galaxy params (not part of gen() output)
     
-    #> declarations
-    original_file_name = fileName
-
-    #> checking to see if file name already exists, chooses new time if already exists
-    while os.path.isdir(dirPath + fileName) and tries > 0:
-        
-        #> getting new time
+    #> directory path
+    if folder != '' and folder[-1] != '/': folder += '/'
+    if parent_dir != '' and parent_dir[-1] != '/': parent_dir += '/'
+    dirPath = parent_dir + dataDir + folder
+    
+    #> file name from the time (+ millisecond info), new time if it already exists
+    fileName = ''
+    while (fileName == '' or os.path.isdir(dirPath + fileName)) and tries > 0:
         dt = str(int( (datetime.now().second*1e3 + datetime.now().microsecond/1e4) / 10 )).zfill(4) # second + millisecond info
-        fileName = time.strftime('%y%m%d%H%M', time.localtime())
-        fileName += dt + suffix + '/'
+        fileName = time.strftime('%y%m%d%H%M', time.localtime()) + dt + suffix + '/'
         tries -= 1
-    
-    #> printing if file name has changed
-    if tries < maxTries:
-        print(f'> The file {original_file_name} has been changed to {fileName}')
     
     #> making directory
     parent_dir = dirPath + fileName
     Path(parent_dir).mkdir(parents=True, exist_ok=True)
     
-    #> iterating through out keys
-    for key in out.keys():
-        
-        #> if wanting bprofiles csv
-        if key in ['csv']:
-            # parse.bprof_to_df(bprofiles, save=True, outFile=parent_dir + fileName[:-1]+'_df.csv')
-            continue
-        
-        #> all other keys
-        np.save(parent_dir + fileName[:-1] + f'_{key}', out[key])
-
-    return
+    
+    #>>># STACKING GALAXIES #<<<#
+    
+    #> one row per source (stacks gen() output if it is still split by galaxy)
+    data = out if 'images' in out else parse.stack(out, paramRanges=paramRanges)
+    if paramRanges is not None: data = data | {'paramRanges': paramRanges}
+    
+    
+    #>>># SAVING #<<<#
+    
+    #> saveDict key: data key (file = <fileName>_<data key>)
+    ends = {'images': 'images', 'im_obs': 'obs', 
+            'im_mags': 'mags' , 'delays': 'delays', 
+            'sources': 'srcs' , 'nims': 'nims', 
+            'flag': 'flag'    , 'gal': 'gal',
+            'bprofiles': 'bprofiles', 'paramRanges': 'paramRanges'}
+    
+    #> saving arrays
+    for skey, key in ends.items():
+        if saveDict.get(skey, False) and key in data: np.save(parent_dir + fileName[:-1] + f'_{key}', data[key])
+    if saveDict.get('csv', False):
+        df = data['df'] if 'df' in data else parse.bprof_to_df(bprofiles=data['bprofiles'])
+        df.to_csv(parent_dir + fileName[:-1] + '_df.csv', index=False)
+    
+    #> print
+    print(f'> Saved {len(data["nims"])} sources from {len(data["bprofiles"])} galaxies to {parent_dir}')
+    
+    return parent_dir
 
 
 """ #> NEWTON METHOD =================
@@ -289,47 +307,35 @@ def genQuadNewt(bprof, numSource, nph=50, rng=None, **kwargs):
     ims  = res['images']     # image positions [arcsec]
     mu   = res['mu']         # image magnifications
     quad = res['nims'] == 5  # quad mask
+    flag = res['flag']       # true if nims > jmax
     
     #> out dictionary (fills with nans if needed)
     out = {'images': np.full_like(ims, np.nan), 
            'mu':     np.full_like(mu, np.nan),
            'srcs':   srcs,                      # sources
            'nims':   res['nims'],               # number of images
+           'flag':   flag,                      # true if nims > jmax
            'delays': np.full_like(mu, np.nan)}  # time delays [days] (nan for deflect)
     
     #> if using lens potential (fermat order)
     if method == 'lpot':
         
-        #> returns imgaes and mags in fermat order
-        o_ims, o_mu, tau = order.fermat_order(ims[quad][:,:5], mu[quad][:,:5], srcs[quad], bprof)
+        #> returns images and mags in fermat order (for nan: tau = inf, sorted last)
+        sel = res['nims'] > 0  # every source w/ images
+        out['images'][sel], out['mu'][sel], tau = order.fermat_order(ims[sel], mu[sel], srcs[sel], bprof)
         
-        #> gets time delays
+        #> gets time delays (nan for padding)
         D_dt = (1 + bprof['zl']) * (4 * np.pi * u.G_kpc_solMass) * bprof['angDist']**2 * bprof['sigCrit'] / u.c_kpc**2 # kpc
-        out['delays'][quad,:5] = D_dt / u.c_kpc * (tau - tau[:,:1]) / 86400 # days
+        out['delays'][sel] = np.where(np.isinf(tau), np.nan, D_dt / u.c_kpc * (tau - tau[:,:1]) / 86400) # days
     
-    else: #> if only using deflection angles (morphological order)
-        o_ims, o_mu = order.morph_order(ims[quad][:,:5], mu[quad][:,:5])
-        
-    #> saving images and mags
-    out['images'][quad,:5] = o_ims
-    out['mu'][quad,:5]     = o_mu
-
-    #> raw (unordered) images and mags of sources w/ more than jmax images
-    flag = res['flag']
-    out['images'][flag] = ims[flag]
-    out['mu'][flag]     = mu[flag]
-    out['flag']         = flag         # true if nims > jmax
-
-    # !!! (i think i only need this extra step when flag na method == 'deflect')
-    #> fermat orders all images of sources w/ more than jmax image
-    if method == 'lpot' and flag.any():
-        out['images'][flag], out['mu'][flag], f_tau = order.fermat_order(ims[flag], mu[flag], srcs[flag], bprof)
-        out['delays'][flag] = np.where(np.isinf(f_tau), np.nan, D_dt / u.c_kpc * (f_tau - f_tau[:,:1]) / 86400) # days
+    else: #> if only using deflection angles (morphological order, quads only)
+        out['images'][quad,:5], out['mu'][quad,:5] = order.morph_order(ims[quad][:,:5], mu[quad][:,:5])
+        out['images'][flag], out['mu'][flag]       = ims[flag], mu[flag]
     
-    #> observables
+    #> observables (quads only)
     if observables is not None:
-        out['obs'] = np.full((len(srcs), len(observables)), np.nan) # padding
-        out['obs'][quad] = geometry.quad_obs(o_ims, observables)    # calculating
+        out['obs'] = np.full((len(srcs), len(observables)), np.nan)                     # padding
+        out['obs'][quad] = geometry.quad_obs(out['images'][quad][:,:5], observables)    # calculating
     
     return out
 
@@ -347,10 +353,12 @@ def gen(**kwargs):
     rng         = kwargs.get('rng', np.random.default_rng(seed))
     
     #> cosmology
-    cosmo                = u.cosmo              # default cosmology dict
-    cosmo['h0']          = 70.0                 # hubble param
-    cosmo['omega_m_0']   = 0.27                 # matter density
-    cosmo['omega_lam_0'] = 1-cosmo['omega_m_0'] # cosmological constant
+    cosmo  = dict(kwargs.get('cosmo', u.cosmo)) # cosmology dict
+    cosmo |= {k: kwargs[k] for k in ['h0', 'omega_m_0', 'omega_lam_0'] if k in kwargs}  # changes params if passed
+    for p1, p2 in zip(('omega_m_0', 'omega_lam_0'), ('omega_lam_0', 'omega_m_0')):      # ensures flat cosmology
+        if p1 in kwargs and p2 not in kwargs: cosmo[p2] = 1 - cosmo[p1] 
+    if abs(cosmo['omega_m_0'] + cosmo['omega_lam_0'] - 1) > 1e-6:                       # if not flat, highlight message
+        error.highlight(f'non-flat cosmology: omega_m_0 + omega_lam_0 = {cosmo["omega_m_0"] + cosmo["omega_lam_0"]:.3f}')
     
     #> unpacking kwargs
     numGals     = kwargs.get('numGals'  ,    1) # number of galaxies to lens from
@@ -375,16 +383,15 @@ def gen(**kwargs):
     priorDict   = kwargs.get('priorDict', params.getPriorDict(nfw=nfw_priors, hern=hern_priors, red=red_priors))
     selDict     = kwargs.get('selDict', params.getSelDict(**kwargs)) # selection effects (res, slcs, ER_resolution, ...)
     
-    # if pix_arc = None, turn on autoscaling
-    # if redshifts = None, random sampling
+    #> if only one redshift is supplied, tile
+    if redshifts is not None and np.ndim(redshifts) == 1: 
+        redshifts = np.tile(np.array(redshifts, dtype=object), (numGals, 1))
     
-    #> single (zl, zs) --> same redshifts for every galaxy
-    if redshifts is not None and np.ndim(redshifts) == 1: redshifts = np.tile(np.array(redshifts, dtype=object), (numGals,1))
+    #> setting pix_arc
+    if pix_arc is None:                        # autoscaled if drawing from priors
+        pix_arc = paramRanges['pix_arc']       # if not supplied, revert to paramRanges default
     
-    #> pix_arc (autoscaled from the look-up tables if drawing from priors, otherwise paramRanges if None)
-    if pix_arc is None: pix_arc = paramRanges['pix_arc']       # pix/arcsec
-    
-    #> galaxies (kwargs passed thru; mdef, msr_method, ER_resolution, ... are read downstream)
+    #> galaxies
     bprofiles   = params.bprofiles(**(kwargs | {'numGals':   numGals,                   # number of galaxies
                                                 'ranges':    paramRanges,               # galaxy params
                                                 'pix_arc':   np.full(numGals, pix_arc), # pix/arcsec
@@ -421,9 +428,11 @@ def gen(**kwargs):
                         **kwargs)            # everything else! yippee!
         
         #> saving to out
-        bnum = str(i+1).zfill( np.max([2, int(np.log10(numGals))]) )
         o   |= {'bprof': bprof}
-        out |= {f'{bnum}': o}
+        out |= {parse.bnum(i, numGals): o}
+    
+    #> one row per source (same format as the saved files), unless stack=False
+    if kwargs.get('stack', True): out = parse.stack(out, paramRanges=paramRanges)
     
     return out
 
@@ -437,11 +446,15 @@ if __name__ == '__main__':
     #> name
     print('> '+os.path.basename(__file__),'\n')
     
+    import modules.parse as parse
+    
     observables = getObservables(add=['d23'])
     print(observables)
     
     out = gen(numGals=10, numSource=10, observables=observables)
-    print(out['01'].keys())
+    parent_dir = save(out)
+    
+    data = parse.load(parent_dir)
 
     # end
 # thank

@@ -88,7 +88,7 @@ def pfimsFn(x, y, gradx, grady, lamt, pix_arc, nph, observables, profiles):
         
     #> if caustic area is 0? or very small?
     if Polygon(source_apexes).area < 1e-6:
-        import plot
+        import oldplot as plot
         plot.caustics(x, y, gradx, grady, pix_arc=pix_arc, outFile='zero-caustic')
         plot.ccurves(x, y, gradx, grady, pix_arc=pix_arc)
         plot.causticBox(x, y, gradx, grady, boxPoints=source_apexes, pix_arc=pix_arc, outFile='caustic-box', zoom=1)
@@ -629,7 +629,7 @@ if __name__ == '__main__':
     print('> '+os.path.basename(__file__))
     
     #> imports
-    import plot
+    import oldplot as plot
     import deflection
     import params
     

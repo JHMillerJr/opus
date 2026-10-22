@@ -8,19 +8,15 @@
 #> imports
 import numpy as np
 import pandas as pd
+from pathlib import Path
 
 #> plotting
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
-#> larger folder glob
-from pathlib import Path
-
-#> classes
-import lensing
-
 #> modules
+import profiles
 from modules.units import u; u=u()
 import modules.error as error
 
@@ -32,16 +28,9 @@ import modules.error as error
 global fig_loc
 fig_loc = 'figures/'
 
-#> saving parameters
-dpi = 600
-imSize = 80
-
-#> labels
-fontsize = 15
-labelpad = 10
-
-#> time order labels
-orderLabels = True
+#> plotting params
+dpi, imSize = 600, 80
+fontsize, labelpad = 15, 10
 
 #> contour levels
 kappa_levels = np.logspace(np.log10(0.1), np.log10(2.5), 35)
@@ -49,13 +38,69 @@ lpot_levels = np.logspace(np.log10(2000), np.log10(100000), 35)
 kappa_multiples_levels = np.linspace(-0.01, 0.01, 35)
 
 #> color cycle
-plt.rcParams['axes.prop_cycle'] = plt.cycler(color=['blue', 'red', 'orange', 'magenta',
-                                                    'teal', 'limegreen', 'brown', 'darkviolet']) 
-# cycle_colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
+colors = ['blue', 'red', 'orange', 'magenta', 'teal', 'limegreen', 'brown', 'darkviolet']
 
 
-""" #> FORMATTING ====================
+""" #> STYLE =========================
 ================================== """
+
+#> automatically sets style
+def setStyle():
+    plt.rcParams['axes.prop_cycle']   = plt.cycler(color=colors)
+    plt.rcParams['axes.titlesize']    = fontsize
+    plt.rcParams['axes.titleweight']  = 'bold'
+    plt.rcParams['axes.labelsize']    = fontsize
+    plt.rcParams['axes.labelweight']  = 'bold'
+    plt.rcParams['axes.labelpad']     = labelpad
+    plt.rcParams['legend.framealpha'] = 1
+    plt.rcParams['legend.edgecolor']  = '1'
+    plt.rcParams['savefig.dpi']       = dpi
+    plt.rcParams['savefig.bbox']      = 'tight'
+    return
+setStyle()
+
+#> formats one axis
+def styleAx(ax, title=None, xlabel=None, ylabel=None, sky=False, grid=None):
+    
+    #> sky axes
+    if sky:
+        if xlabel is None: xlabel = 'RA [arcsec]'
+        if ylabel is None: ylabel = 'DEC [arcsec]'
+        ax.invert_xaxis()
+    
+    #> labels
+    if title  is not None: ax.set_title(title, fontsize=fontsize, fontweight='bold')
+    if xlabel is not None: ax.set_xlabel(xlabel, fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+    if ylabel is not None: ax.set_ylabel(ylabel, fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+    
+    #> grid (default: on for data plots, off for maps)
+    if grid is None: grid = not sky
+    if grid: ax.grid(ls=':', alpha=0.5)
+    
+    return ax
+
+#> legend
+def legend(ax=None):
+    if ax is None: ax = plt.gca()
+    ax.legend(framealpha=1, edgecolor='1', prop={'weight':'bold'})
+    return
+
+#> zooms, saves, shows + closes a figure
+def finish(fig, ax=None, outFile=None, zoom=1, loc=None):
+    
+    #> zoom function! :)
+    if ax is not None and zoom != 1:
+        ax.set_xlim(np.array(ax.get_xlim())/zoom)
+        ax.set_ylim(np.array(ax.get_ylim())/zoom)
+    
+    #> saving (before showing, so the file is not blank)
+    if loc is None: loc = fig_loc
+    if outFile not in (None, False): fig.savefig(loc + str(outFile) + '.png', dpi=dpi, bbox_inches='tight')
+    
+    #> showing & closing
+    plt.show(); plt.close(fig)
+    
+    return
 
 #> makes a box
 def toBox(ax, margin=0.1):
@@ -96,8 +141,8 @@ def plotImages(ax, images, **kwargs):
     for im in images:
         ax.scatter(im[:,0],
                    im[:,1],
-                   zorder=5, s=imSize, label=len(im[:,0]))
-    plt.legend(framealpha=1, edgecolor='1', prop={'weight':'bold'})
+                   zorder=5, s=imSize, label=int(np.isfinite(im[:,0]).sum()))
+    legend(ax)
     
     return
 
@@ -107,110 +152,157 @@ def plotArrival(ax, quad, **kwargs):
     
     for i, im in enumerate(quad):
         ax.scatter(im[0],im[1], zorder=5, s=imSize, label=f'{i+1}')
-    plt.legend(framealpha=1, edgecolor='1', prop={'weight':'bold'})
+    legend(ax)
     
     return
+
+
+""" #> LENS MAPS =====================
+================================== """
+
+#> lens-plane maps of one galaxy
+def lensMaps(bprof, nph=50):
+    
+    #> lens-plane grid 
+    pix_arc = bprof['pix_arc'] 
+    w = np.arange(-nph, nph, 1, dtype=float) / pix_arc   # arcsec
+    xg, yg = np.meshgrid(w, w)                           # arcsec
+    
+    #> deflection angles + jacobian
+    ax, ay, axx, axy, ayx, ayy = profiles.alpha_jac_points(xg, yg, bprof) # arcsec, --
+    
+    #> kappa, shear, ccurves, mags
+    kappa  = 0.5*(axx + ayy)
+    gamma  = np.hypot(0.5*(axx - ayy), 0.5*(axy + ayx))
+    lamt   = 1 - kappa - gamma
+    lamr   = 1 - kappa + gamma
+    mu     = 1 / (lamt*lamr)     # signed mags
+    
+    return {'x': xg, 'y': yg, 'ax': ax, 'ay': ay, 'kappa': kappa, 'gamma': gamma,
+            'lamt': lamt, 'lamr': lamr, 'mu': mu, 'pix_arc': pix_arc}
+
+
+#> critical curves and caustics
+def critCaustics(maps, bprof):
+    
+    #> imports
+    from skimage import measure
+    
+    #> declarations
+    x0, y0  = maps['x'][0,0], maps['y'][0,0]   # arcsec
+    arc_pix = maps['x'][0,1] - x0              # arcsec per pixel
+    
+    #> lam = 0 contours
+    curves, caus = {}, {}
+    for key in ['lamt', 'lamr']:
+        
+        #> lam = 0 contours
+        cs_pix = measure.find_contours(maps[key], 0.0)
+        
+        #> pix --> arcsec
+        cs = [np.column_stack((x0 + c[:,1]*arc_pix,
+                               y0 + c[:,0]*arc_pix)) for c in cs_pix]
+        
+        #> back-projecting
+        ca = []
+        for c in cs:
+            ax, ay = profiles.alpha_points(c[:,0], c[:,1], bprof)
+            ca.append(np.column_stack((c[:,0] - ax, c[:,1] - ay)))
+        
+        #> saving
+        curves[key] = cs
+        caus[key]   = ca
+    
+    return (curves['lamt'], curves['lamr']), (caus['lamt'], caus['lamr']) # arcsec
 
 
 """ #> BASIC GALAXY PLOTS ============
 ================================== """
 
 #> plotting deflection angles
-def deflect(X, Y, delx, dely, outFile=False, images=None):
+def deflect(bprof, nph=50, outFile=False, images=None):
 
-    # initializing plot
-    fig, ax = plt.subplots(1,2, figsize=(16,6))
-    for i, axes in enumerate(ax.flat):
+    #> lens maps (arcsec)
+    maps = lensMaps(bprof, nph)
+    X, Y, delx, dely = maps['x'], maps['y'], maps['ax'], maps['ay']
+
+    #> initializing plot
+    fig, axes = plt.subplots(1,2, figsize=(16,6))
+    for i, ax in enumerate(axes.flat):
         
-        axes.set_xlabel('RA [arcsec]')
-        axes.invert_xaxis() 
+        #> setting ax
+        styleAx(ax, sky=True, ylabel='DEC [arcsec]' if i == 0 else '')
         
         if i == 0: # gradx
-            axes.set_title('delx', fontweight='bold')
-            axes.set_ylabel('DEC [arcsec]')
-            gx = axes.contourf(X, Y, delx)
+            ax.set_title(r'$\alpha_x$ [arcsec]', fontweight='bold')
+            gx = ax.contourf(X, Y, delx)
             
             #> plotting images
             if images is not None:
-                axes.scatter(images[:,0], images[:,1], zorder=5, s=imSize)
+                ax.scatter(images[:,0], images[:,1], zorder=5, s=imSize)
             
         if i == 1: # grady
-            axes.set_title('dely', fontweight='bold')
-            gy = axes.contourf(X, Y, dely)
+            ax.set_title(r'$\alpha_y$ [arcsec]', fontweight='bold')
+            gy = ax.contourf(X, Y, dely)
             
             #> plotting images
             if images is not None:
-                axes.scatter(images[:,0], images[:,1], zorder=5, s=imSize)
+                ax.scatter(images[:,0], images[:,1], zorder=5, s=imSize)
      
     #> colorbar
     plt.colorbar(gx); plt.colorbar(gy)
     
-    #> saving and closing
-    if outFile != False: plt.savefig(fig_loc + outFile + '.png', dpi=dpi, bbox_inches='tight')
-    
-    #> showing & closing
-    plt.show(); fig.clear(); plt.close()
+    #> saving, showing & closing
+    finish(fig, outFile=outFile)
     
     return
     
 
 #> plots kappa
-def kappa(X, Y, delx, dely, pix_arc, images=None, outFile=False):
+def kappa(bprof, nph=50, images=None, outFile=False):
     
     #> initializing plot
     fig, ax = plt.subplots(figsize=(6,6))
-    ax.set_title('Kappa', fontweight='bold')
-    ax.set_xlabel('RA [arcsec]'); ax.set_ylabel('DEC [arcsec]')
-    ax.invert_xaxis() 
+    styleAx(ax, title='Kappa', sky=True)
     
-    #> calculating kappa (overplots on kappa)
-    gradxy, gradxx = np.gradient(delx * pix_arc * u.arc_rad)
-    gradyy, gradyx = np.gradient(dely * pix_arc * u.arc_rad)
-    kappa = 0.5 * (gradxx + gradyy)
+    #> calculating kappa (analytic)
+    maps = lensMaps(bprof, nph)
+    X, Y, kappa = maps['x'], maps['y'], maps['kappa']
     
     #> plotting!
-    cs = ax.contour(X / pix_arc, Y / pix_arc, kappa, levels=kappa_levels, colors='k')
+    cs = ax.contour(X, Y, kappa, levels=kappa_levels, colors='k')
     # ax.clabel(cs, cs.levels, fontsize=10)
     
     #> plotting images
     if images is not None:
         plotImages(ax, images)
     
-    #> saving and closing
-    if outFile != False: plt.savefig(fig_loc + outFile + '.png', dpi=dpi, bbox_inches='tight')
-        
-    #> showing & closing
-    plt.show(); fig.clear(); plt.close()
+    #> saving, showing & closing
+    finish(fig, outFile=outFile)
 
     return
 
 #> plots kappa
-def kappaMultipoles(X, Y, delx, dely, pix_arc, images=None, outFile=False):
+def kappaMultipoles(bprof, nph=50, images=None, outFile=False):
     
     #> initializing plot
     fig, ax = plt.subplots(figsize=(6,6))
-    ax.set_title('Kappa', fontweight='bold')
-    ax.set_xlabel('RA [arcsec]'); ax.set_ylabel('DEC [arcsec]')
-    ax.invert_xaxis() 
+    styleAx(ax, title='Kappa', sky=True)
     
-    #> calculating kappa (overplots on kappa)
-    gradxy, gradxx = np.gradient(delx * pix_arc * u.arc_rad)
-    gradyy, gradyx = np.gradient(dely * pix_arc * u.arc_rad)
-    kappa = 0.5 * (gradxx + gradyy)
+    #> calculating kappa (analytic)
+    maps = lensMaps(bprof, nph)
+    X, Y, kappa = maps['x'], maps['y'], maps['kappa']
     
     #> plotting!
-    cs = ax.contour(X / pix_arc, Y / pix_arc, kappa, levels=kappa_multiples_levels, colors='k')
+    cs = ax.contour(X, Y, kappa, levels=kappa_multiples_levels, colors='k')
     # ax.clabel(cs, cs.levels, fontsize=10)
     
     #> plotting images
     if images is not None:
         plotImages(ax, images)
     
-    #> saving and closing
-    if outFile != False: plt.savefig(fig_loc + outFile + '.png', dpi=dpi, bbox_inches='tight')
-        
-    #> showing & closing
-    plt.show(); fig.clear(); plt.close()
+    #> saving, showing & closing
+    finish(fig, outFile=outFile)
 
     return
     
@@ -223,12 +315,9 @@ def fims(X, Y, deltx, delty, rpts, bpts):
     
     #> initializing plot
     fig, axes = plt.subplots(1,3,figsize=(6*3,6))
-    #ax.set_title('Kappa', fontweight='bold')
-    #ax.set_xlabel('RA [arcsec]'); ax.set_ylabel('DEC [arcsec]')
-    #ax.invert_xaxis() 
     
-    for i, ax in enumerate(axes.flat):
-        
+    #> ploting!
+    for i, ax in enumerate(axes.flat):    
         
         #> deltx
         if i == 0:
@@ -248,7 +337,6 @@ def fims(X, Y, deltx, delty, rpts, bpts):
             axes.set_ylabel('DEC [arcsec]')
             gx = axes.contourf(X, Y, delty)
 
-    
     return
 
 
@@ -256,43 +344,32 @@ def fims(X, Y, deltx, delty, rpts, bpts):
 ================================== """
     
 #> plots magnification map
-def mag(x, y, gradx, grady, pix_arc, images=None, outFile=None, zoom=1):
+def mag(bprof, nph=50, images=None, outFile=None, zoom=1):
     
     #> getting magnification map
-    magmap = np.log(np.abs(lensing.magnification(gradx, grady, pix_arc)))
+    maps   = lensMaps(bprof, nph)
+    magmap = np.log(np.abs(maps['mu']))
     
-    # initializing plot
+    #> initializing plot
     fig, ax = plt.subplots(figsize=(7,6))
-    ax.set_title('Magnification', fontweight='bold')
-    ax.set_xlabel('RA [arcsec]'); ax.set_ylabel('DEC [arcsec]')
-    ax.invert_xaxis() 
+    styleAx(ax, title=r'$\ln|\mu|$', sky=True)
     
     #> magnification map
-    gx = ax.contourf(x / pix_arc, 
-                     y / pix_arc, 
+    gx = ax.contourf(maps['x'], 
+                     maps['y'], 
                      magmap, levels=50)
     
     #> plotting images
     if images is not None:
-        for i, src in enumerate(images.keys()): # each source
-            ax.scatter(images[src][:,0],
-                       images[src][:,1],
-                       zorder=5, s=imSize, label=src)
-        plt.legend(framealpha=1, edgecolor='1', prop={'weight':'bold'})
+        if len(images.shape) != 3:
+            images = np.array([images])
+        plotImages(ax, images)
     
     #> colorbar
     plt.colorbar(gx)
     
-    #> zoom function! :)
-    ax.set_xlim(np.array(ax.get_xlim())/zoom)
-    ax.set_ylim(np.array(ax.get_ylim())/zoom)
-    
-    #> saving and closing
-    if outFile is not None: 
-        plt.savefig(fig_loc + outFile + '.png', dpi=dpi, bbox_inches='tight')
-        
-    #> showing & closing
-    plt.show(); fig.clear(); plt.close()
+    #> zooming, saving, showing & closing
+    finish(fig, ax, outFile=outFile, zoom=zoom)
     
     return
 
@@ -301,28 +378,25 @@ def mag(x, y, gradx, grady, pix_arc, images=None, outFile=None, zoom=1):
 ================================== """
 
 #> plots critical curves
-def ccurves(x, y, gradx, grady, pix_arc,
+def ccurves(bprof, nph=50,
             xs=None, ys=None, images=None, outFile=None, zoom=1):
     
     #> calculating kappa (overplots on kappa)
-    gradxy, gradxx = np.gradient(gradx * pix_arc * u.arc_rad)
-    gradyy, gradyx = np.gradient(grady * pix_arc * u.arc_rad)
-    kappa = 0.5 * (gradxx + gradyy)
+    maps  = lensMaps(bprof, nph)
+    kappa = maps['kappa']
     
     #> getting critical curves
-    tcurve, rcurve = lensing.ccurves(x, y, gradx, grady, pix_arc)
+    (tcurve, rcurve), _ = critCaustics(maps, bprof)
     
     #> initializing plot
     fig, ax = plt.subplots(figsize=(6,6))
-    ax.set_title('Critical Curves + Kappa', fontweight='bold')
-    ax.set_xlabel('RA [arcsec]'); ax.set_ylabel('DEC [arcsec]')
-    ax.invert_xaxis() 
+    styleAx(ax, title='Critical Curves + Kappa', sky=True)
     
     #> plotting!
-    cs = ax.contour(x / pix_arc, y / pix_arc, 
+    cs = ax.contour(maps['x'], maps['y'], 
                     kappa, levels=kappa_levels, colors='k', alpha=0.5)
-    for line in tcurve: ax.plot(*line.xy, c='b', label=r'$\lambda_t$')
-    for line in rcurve: ax.plot(*line.xy, c='r', label=r'$\lambda_r$')
+    for line in tcurve: ax.plot(*line.T, c='b', label=r'$\lambda_t$')
+    for line in rcurve: ax.plot(*line.T, c='r', label=r'$\lambda_r$')
     
     #> plotting source + images
     if xs is not None: ax.scatter(xs, ys, c='r', zorder=2, marker='*', s=100)
@@ -333,47 +407,35 @@ def ccurves(x, y, gradx, grady, pix_arc,
             images = np.array([images])
         plotImages(ax, images)
     
-    #> zoom function! :)
-    ax.set_xlim(np.array(ax.get_xlim())/zoom)
-    ax.set_ylim(np.array(ax.get_ylim())/zoom)
-    
-    #> saving and closing
-    if outFile is not None: 
-        plt.savefig(fig_loc + outFile + '.png', dpi=dpi, bbox_inches='tight')
-    
-    #> showing & closing
-    plt.show(); plt.close()
+    #> zooming, saving, showing & closing
+    finish(fig, ax, outFile=outFile, zoom=zoom)
     
     return
 
 
 #> plotting caustics
-def caustics(x, y, gradx, grady, pix_arc, 
+def caustics(bprof, nph=50, 
              xs=None, ys=None, images=None, outFile=None, zoom=1):
 
     #> calculating kappa (overplots on kappa)
-    gradxy, gradxx = np.gradient(gradx * pix_arc * u.arc_rad)
-    gradyy, gradyx = np.gradient(grady * pix_arc * u.arc_rad)
-    kappa = 0.5 * (gradxx + gradyy)
+    maps  = lensMaps(bprof, nph)
+    kappa = maps['kappa']
     
-    #> getting caustics
-    dcaustic, ocaustic = lensing.caustics(x, y, gradx, grady, pix_arc)
+    #> getting caustics (tangential, radial)
+    _, (dcaustic, ocaustic) = critCaustics(maps, bprof)
     
     #> initializing plot
     fig, ax = plt.subplots(figsize=(6,6))
-    ax.set_title('Caustics + Kappa', fontweight='bold')
-    ax.set_xlabel('RA [arcsec]'); ax.set_ylabel('DEC [arcsec]')
-    ax.invert_xaxis() 
+    styleAx(ax, title='Caustics + Kappa', sky=True)
     
     #> plotting!
-    cs = ax.contour(x / pix_arc, y / pix_arc, 
+    cs = ax.contour(maps['x'], maps['y'], 
                     kappa, levels=kappa_levels, colors='k', alpha=0.5)
-    for line in dcaustic: ax.plot(*line.xy, c='b')
-    for line in ocaustic: ax.plot(*line.xy, c='r')
+    for line in dcaustic: ax.plot(*line.T, c='b')
+    for line in ocaustic: ax.plot(*line.T, c='r')
     
     #> plotting source + images
-    # if xs.all() != False: 
-    ax.scatter(xs, ys, c='r', zorder=2, marker='.', s=100)
+    if xs is not None: ax.scatter(xs, ys, c='r', zorder=2, marker='*', s=100)
     
     #> plotting images
     if images is not None:
@@ -382,50 +444,39 @@ def caustics(x, y, gradx, grady, pix_arc,
         plotImages(ax, images)
 
         
-    #> zoom function! :)
-    ax.set_xlim(np.array(ax.get_xlim())/zoom)
-    ax.set_ylim(np.array(ax.get_ylim())/zoom)
-            
-    #> saving and closing
-    if outFile is not None: 
-        plt.savefig(fig_loc + outFile + '.png', dpi=dpi, bbox_inches='tight')
-    
-    #> showing & closing
-    plt.show(); plt.close()
+    #> zooming, saving, showing & closing
+    finish(fig, ax, outFile=outFile, zoom=zoom)
     
     return
 
 
 #> plotting caustics
-def causticBox(x, y, gradx, grady, pix_arc, boxPoints, 
+def causticBox(bprof, boxPoints, nph=50, 
                xs=None, ys=None, outFile=None, zoom=1, images=None):
 
     #> calculating kappa (overplots on kappa)
-    gradxy, gradxx = np.gradient(gradx * pix_arc * u.arc_rad)
-    gradyy, gradyx = np.gradient(grady * pix_arc * u.arc_rad)
-    kappa = 0.5 * (gradxx + gradyy)
+    maps  = lensMaps(bprof, nph)
+    kappa = maps['kappa']
     
-    #> getting caustics
-    dcaustic, ocaustic = lensing.caustics(x, y, gradx, grady, pix_arc)
+    #> getting caustics (tangential, radial)
+    _, (dcaustic, ocaustic) = critCaustics(maps, bprof)
     
     #> initializing plot
     fig, ax = plt.subplots(figsize=(6,6))
-    ax.set_title('Caustics + Kappa', fontweight='bold')
-    ax.set_xlabel('RA [arcsec]'); ax.set_ylabel('DEC [arcsec]')
-    ax.invert_xaxis() 
+    styleAx(ax, title='Caustics + Kappa', sky=True)
     
     #> plotting!
-    cs = ax.contour(x / pix_arc, y / pix_arc, 
+    cs = ax.contour(maps['x'], maps['y'], 
                     kappa, levels=kappa_levels, colors='k', alpha=0.5)
-    for line in dcaustic: ax.plot(*line.xy, c='b')
-    for line in ocaustic: ax.plot(*line.xy, c='r')
+    for line in dcaustic: ax.plot(*line.T, c='b')
+    for line in ocaustic: ax.plot(*line.T, c='r')
     
     #> plotting images
     if images is not None:
         ax.scatter(images[:,0],
                    images[:,1],
-                   zorder=5, s=imSize, label=len(images[:,0]))
-        plt.legend(framealpha=1, edgecolor='1', prop={'weight':'bold'})
+                   zorder=5, s=imSize, label=int(np.isfinite(images[:,0]).sum()))
+        legend(ax)
       
     #> this needs to be ordered... but how??
     box = mpl.patches.Polygon(boxPoints, facecolor='none', 
@@ -437,16 +488,8 @@ def causticBox(x, y, gradx, grady, pix_arc, boxPoints,
     if xs is not None: 
         ax.scatter(xs, ys, c='r', zorder=2, marker='*', s=100)
             
-    #> saving and closing
-    if outFile is not None: 
-        plt.savefig(fig_loc + outFile + '.png', dpi=dpi, bbox_inches='tight')
-    
-    #> zoom function! :)
-    ax.set_xlim(np.array(ax.get_xlim())/zoom)
-    ax.set_ylim(np.array(ax.get_ylim())/zoom)
-    
-    #> showing & closing
-    plt.show(); plt.close()
+    #> zooming, saving, showing & closing
+    finish(fig, ax, outFile=outFile, zoom=zoom)
     
     return
 
@@ -462,8 +505,8 @@ def plot3D(fileName, observables):
     #> loading in image data
     images = np.load(fileName)
     
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d') 
+    #> initializing plot
+    fig, ax = plt.subplots(figsize=(6,6), subplot_kw={'projection': '3d'})
     
     print(np.max(images[:,0]))
     print(np.max(images[:,1]))
@@ -471,8 +514,10 @@ def plot3D(fileName, observables):
     
     ax.scatter(images[:,0], images[:,1], images[:,2], s=1, alpha=0.1, c='m')
     ax.view_init(elev=10, azim=-30) # Set initial view
+    styleAx(ax, xlabel=observables[0], ylabel=observables[1], grid=False)
+    ax.set_zlabel(observables[2], fontsize=fontsize, labelpad=labelpad, fontweight='bold')
     
-    plt.show()
+    finish(fig)
     
     return
 
@@ -485,30 +530,27 @@ def plotPop(fileName, observables):
     #> loading in image data
     images = np.load(fileName)
     
-    #> plotting image data
-    fig, axes = plt.subplots(1,2,figsize=(12,6))
+    #> initializing plot
+    fig, axes = plt.subplots(1,2, figsize=(12,6))
     
     #> plotting!
-    fontsize = 15
     alpha = 0.01
     size=3
     for i, ax in enumerate(axes.flat):
         
-        ax.grid(ls=':', alpha=0.3)
-        
         if i == 0:
+            styleAx(ax, xlabel=observables[0], ylabel=observables[1])
             ax.set_ylim(-20, 20)
             ax.set_xlim(0, 100)
             ax.scatter(images[:,0], images[:,1], alpha=alpha, c='m', s=size)
-            ax.set_xlabel(observables[0], fontsize=fontsize, fontweight='bold')
-            ax.set_ylabel(observables[1], fontsize=fontsize, fontweight='bold')
             
         if i == 1:
+            styleAx(ax, xlabel=observables[1], ylabel=observables[2])
             ax.set_ylim(0.6, 1.0)
             ax.set_xlim(-3, 3)
             ax.scatter(images[:,1], images[:,2], alpha=alpha, c='m', s=size)
-            ax.set_xlabel(observables[1], fontsize=fontsize, fontweight='bold')
-            ax.set_ylabel(observables[2], fontsize=fontsize, fontweight='bold')
+    
+    finish(fig)
     
     return
 
@@ -520,29 +562,23 @@ def plotPop(fileName, observables):
 def priors_z(df, **kwargs):
     
     #> declarations
-    keys = df.keys()[1:] # removing redshift
+    keys = ['log10_M_vir', 'c_vir', 'log10_M_star', 'R_eff'] # priors.sample_priors columns
     suptitle = kwargs.get('suptitle', None)
     
     #> initializing plot
-    fig, axes = plt.subplots(2, 2, figsize=(13, 12))
+    fig, axes = plt.subplots(2,2, figsize=(13,12))
     if suptitle is not None: 
         plt.suptitle(suptitle, fontsize=fontsize, fontweight='bold', y=0.94)
     
     for i, ax in enumerate(axes.flat):
         
-        ax.grid(ls=':', alpha=0.5)
-        ax.set_ylabel(r'$\mathbf{log_{10}}$'+f'{keys[i]}', fontsize=fontsize, labelpad=labelpad, fontweight='bold')
-        ax.set_xlabel(r'$\mathbf{z_l}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+        styleAx(ax, xlabel=r'$\mathbf{z_l}$', ylabel=keys[i] if 'log10' in keys[i] else r'$\mathbf{log_{10}}$'+f'{keys[i]}')
         
         #> plotting
-        ax.plot(df['zl'], np.log10(df[keys[i]]))
-        
-    plt.show()
+        ax.plot(df['zl'], df[keys[i]] if 'log10' in keys[i] else np.log10(df[keys[i]]))
     
-    #> saving and closing
-    outFile = kwargs.get('outFile', None)
-    if outFile is not None: 
-        plt.savefig(fig_loc + outFile + '.png', dpi=dpi, bbox_inches='tight')
+    #> saving, showing & closing
+    finish(fig, outFile=kwargs.get('outFile', None))
     
     return
 
@@ -550,26 +586,24 @@ def priors_z(df, **kwargs):
 def priors_correl(df, **kwargs):
     
     #> declarations
-    keys = df.keys()[1:] # removing redshift
+    keys = ['log10_M_vir', 'c_vir', 'log10_M_star', 'R_eff'] # priors.sample_priors columns
     suptitle = kwargs.get('suptitle', None)
     
     #> initializing plot
-    fig, axes = plt.subplots(2, 2, figsize=(12, 12))
+    fig, axes = plt.subplots(2,2, figsize=(12,12))
     if suptitle is not None: 
         plt.suptitle(suptitle, fontsize=fontsize, fontweight='bold', y=0.94)
     
     for i, ax in enumerate(axes.flat):
         
-        ax.grid(ls=':', alpha=0.5)
-        ax.set_ylabel(keys[i],fontsize=fontsize, labelpad=labelpad, fontweight='bold')
-        ax.set_xlabel(r'$\mathbf{z_l}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
+        styleAx(ax, xlabel=r'$\mathbf{z_l}$', ylabel=keys[i])
         
         #> halo mass function
         if i == 0:
             
             ax.xaxis.set_major_locator(ticker.MultipleLocator(0.2))
             ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
-            ax.scatter(df['zl'], np.log10(df['M_vir']))
+            ax.scatter(df['zl'], df['log10_M_vir'])
             ax.set_ylabel(r'$\mathbf{log_{10}M_{vir}}$', fontsize=fontsize, labelpad=labelpad, fontweight='bold')
             ax.set_xlabel(r'$\mathbf{z_l}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
             
@@ -579,7 +613,7 @@ def priors_correl(df, **kwargs):
             
             ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
             ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
-            ax.scatter(np.log10(df['M_vir']), df['c_vir'])
+            ax.scatter(df['log10_M_vir'], df['c_vir'])
             ax.set_ylabel(r'$\mathbf{log_{10}c_{vir}}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
             ax.set_xlabel(r'$\mathbf{log_{10}M_{vir}}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
             
@@ -591,7 +625,7 @@ def priors_correl(df, **kwargs):
             ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
             
             #> plotting
-            ax.scatter(np.log10(df['M_vir']), np.log10(df['M_star']))
+            ax.scatter(df['log10_M_vir'], df['log10_M_star'])
             ax.set_ylabel(r'$\mathbf{log_{10}M_{star}}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
             ax.set_xlabel(r'$\mathbf{log_{10}M_{vir}}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
             
@@ -609,7 +643,7 @@ def priors_correl(df, **kwargs):
             ax.set_xlim(*xlims)
             ax.set_ylim(*ylims)
             
-            ax.legend()
+            legend(ax)
             
         #> stellar mass-size relation
         if i == 3:
@@ -619,7 +653,7 @@ def priors_correl(df, **kwargs):
             ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
             
             #> plotting!
-            ax.scatter(np.log10(df['M_star']), np.log10(df['R_eff']))
+            ax.scatter(df['log10_M_star'], np.log10(df['R_eff']))
             ax.set_ylabel(r'$\mathbf{log_{10}R_{eff}}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
             ax.set_xlabel(r'$\mathbf{log_{10}M_{star}}$',fontsize=fontsize, labelpad=labelpad, fontweight='bold')
             
@@ -634,14 +668,10 @@ def priors_correl(df, **kwargs):
             a = 0.81
             b = 0.53
             ax.plot(x, (a*(x-11) + b), c='k', label='2010 Auger')
-            ax.legend()
+            legend(ax)
     
-    #> saving and closing
-    outFile = kwargs.get('outFile', None)
-    if outFile is not None: 
-        plt.savefig(fig_loc + outFile + '.png', dpi=dpi, bbox_inches='tight')
-    
-    plt.show()
+    #> saving, showing & closing
+    finish(fig, outFile=kwargs.get('outFile', None))
     
     return
 
@@ -673,7 +703,6 @@ def bprof(bprofiles=None, csv_fileName='',
     
     #> df should be correct now
     columns = df.columns.to_numpy()
-    numGals = len(df)
     
     #> parsing keys we don't care about
     parseKey = ['add', 'slope', 'x0', 'y0', 
@@ -697,8 +726,8 @@ def bprof(bprofiles=None, csv_fileName='',
         keys = np.hstack([keys, np.array([None] * (r**2 - numKeys) )])
         array = keys.reshape(r, r)
         
-        #> initializing figure
-        fig, axes = plt.subplots(r,r,figsize=(6*r, 6*r))
+        #> initializing plot
+        fig, axes = plt.subplots(r,r, figsize=(6*r,6*r))
         
         #> plotting
         for i, ax in enumerate(axes.flat):
@@ -710,8 +739,7 @@ def bprof(bprofiles=None, csv_fileName='',
                 continue
             
             #> initializing
-            ax.grid(ls=':', alpha=0.5)
-            ax.set_xlabel(key, fontsize=15, fontweight='bold')
+            styleAx(ax, xlabel=key)
             
             #> plotting
             ax.hist(df[key].astype(float), density=True, bins=15)
@@ -739,8 +767,8 @@ def bprof(bprofiles=None, csv_fileName='',
             arrays[i] = np.hstack((array, [None] * (numCols - lengths[i]) ))
         arrays = np.array(arrays)
         
-        #> initializing figure
-        fig, axes = plt.subplots(numRows,numCols,figsize=(6*numCols, 6*numRows))
+        #> initializing plot
+        fig, axes = plt.subplots(numRows,numCols, figsize=(6*numCols,6*numRows))
         
         #> settin title
         if file is not None:
@@ -759,8 +787,7 @@ def bprof(bprofiles=None, csv_fileName='',
                 continue
             
             #> initializing
-            ax.grid(ls=':', alpha=0.5)
-            ax.set_xlabel(key, fontsize=15, fontweight='bold')
+            styleAx(ax, xlabel=key)
             
             #> plotting
             ax.hist(df[key].astype(float), density=True, bins=15)
@@ -769,11 +796,8 @@ def bprof(bprofiles=None, csv_fileName='',
     
 
     
-    #> saving and closing
-    if outFile is not None: 
-        plt.savefig(outFile + '.png', dpi=dpi, bbox_inches='tight')
-    
-    plt.show()
+    #> saving (outFile is a full path here), showing & closing
+    finish(fig, outFile=outFile, loc='')
     
     return
 

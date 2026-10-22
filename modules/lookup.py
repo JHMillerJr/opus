@@ -1,6 +1,7 @@
 #> name: lookup.py
 #> author: John Miller Jr
-#> descrp: scrapes look up tables for quick prior draws
+#> descrp: scrapes the newt look-up tables (priors/genlookup_newt.py) for quick prior draws: einstein radius, pixel scale,
+#>         and quad probability, w/ the axis-ratio corrections of priors/calib_qfactor.py (old versions: pastlens/oldlookup.py)
 
 """ #> IMPORTS =======================
 ================================== """
@@ -8,377 +9,188 @@
 #> standard imports
 import os
 import sys
+import json
 import numpy as np
 import pandas as pd
-
-#> file
-import json
 
 #> caching
 from functools import lru_cache
 from itertools import product
 
 #> adding dir to sys paths
-sys.path.append(os.path.dirname(__file__)) 
+sys.path.append(os.path.dirname(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 
-""" #> READING =======================
+""" #> DECLARATIONS ==================
 ================================== """
 
-#> loading zl look-up table
-@lru_cache(maxsize=None)
-def load_model_table(izl, **kwargs):
-    
-    #> kwargs
-    returnFile = kwargs.get('returnFile', False)
-    
-    #> declarations
-    lookUpBins = look_up_bins()
-    zl = lookUpBins['zl']['grid'][int(izl)]
-    loc = './priors/look_up_tables/'
-    fileName = loc+f'model_zl_{zl:.2f}.parquet'
-    
-    #> if just wanting the file name
-    if returnFile: return fileName
+#> look-up tables for each halo mass definition (priors/genlookup_newt.py)
+lookup_locs_newt = {'vir':  './priors/newt_tables_cvir/',              # nfw w/ delta_vir, c_vir
+                    '200c': './priors/newt_tables_c200/'}              # nfw w/ delta = 200, c_200
+gridFile         = 'lookup_grid_newt.json'                             # grid metadata
 
-    #> loading table
-    return pd.read_parquet(fileName)
+#> axis-ratio corrections (priors/calib_qfactor.py); the tables are made at q_ref = 0.85
+qfactor_loc = './priors/qfactor.json'
 
-#> loading a model from the look-up table
-@lru_cache(maxsize=None)
-def load_model(izl, izs, ilogmvir, ilogmstar, ire):
-    
-    #> converting indices
-    izl, izs = int(izl), int(izs)
-    ilogmvir, ilogmstar, ire = int(ilogmvir), int(ilogmstar), int(ire)
-    
-    #> loading
-    lookUpBins = look_up_bins()
-    df = load_model_table(izl)
-    
-    #> finding model
-    i = np.ravel_multi_index((izs,
-                              ilogmvir,
-                              ilogmstar,
-                              ire),
-                             (lookUpBins['zs']['bins'],
-                              lookUpBins['logmvir']['bins'],
-                              lookUpBins['mstar_nsig']['bins'],
-                              lookUpBins['re_nsig']['bins']))
-    
-    return df.iloc[i]
+#> grid axes (table rows: izs, then logmvir, mstar_nsig, re_nsig)
+gridKeys = ['zl', 'zs', 'logmvir', 'mstar_nsig', 're_nsig']
 
-#> returns closest look-up bin indices
-def bin_indices(x, grid):
-    x, grid = np.asarray(x), np.asarray(grid)
-    return np.abs(x[:,None] - grid[None,:]).argmin(axis=1)
+#> galaxy columns used for the look-up (same order as gridKeys)
+galCols = ['zl', 'zs', 'log10_M_vir', 'mstar_nsig', 're_nsig']
+
+#> interpolated table values
+valCols = ['ER', 'q_area', 'q_area_max', 'r_area', 't_area']
 
 
-
-""" #> EDITING =======================
+""" #> TABLE LOCATION ================
 ================================== """
 
-#> makes edits to all zl look-up tables
-def edit_model_table(**kwargs):
-    
-    #> kwargs
-    max_er = kwargs.get('max_er', 2.4)
-    
-    #> loading bins
-    lookUpBins = look_up_bins()
-    
-    #> loading each file
-    for izl, zl in enumerate(lookUpBins['zl']['grid']):
-        
-        #> loading model
-        model = load_model_table(izl)
-        fileName = load_model_table(izl, returnFile=True)
-        
-        #> iterating through each zs
-        for izs in range(lookUpBins['zs']['bins']):
-            
-            #> filtering
-            mask = (model['izs'] == izs) & (model['ER'] <=  max_er)
-            d_area_max = model.loc[mask,'d_area'].max()
-            
-            #> applying to all at izs
-            mask = (model['izs'] == izs)
-            model.loc[mask,'d_area_max'] = d_area_max
-            
-        #> probability of a quad
-        model['p_quad'] = (model['d_area'] / model['d_area_max']).clip(0,1).fillna(0)
-        
-        #> saving files
-        print(fileName)
-        model.to_parquet(fileName)
-    
-    return
+#> true if a newt table folder is finished (metadata + every zl table)
+def complete_newt(loc):
+
+    #> metadata
+    meta = os.path.join(loc, gridFile)
+    if not os.path.isfile(meta): return False
+    with open(meta) as f: zls = json.load(f)['zl_grid']
+
+    #> every zl table
+    return all(os.path.isfile(table_file(loc, zl)) for zl in zls)
 
 
-""" #> LOOK-UP TABLES ================
-================================== """
+#> look-up directory for a halo mass definition
+def lookup_dir_newt(mdef='vir'):
 
-#> returns look up bins
-def look_up_bins(**kwargs):
-    
-    #>  kwargs
-    scale_factor = kwargs.get('scale_factor', 1)
-    
-    #> dictionary
-    lookUpBins = {'zl':         {'min': 0.01, 'max':  1.8, 'bins': 20},
-                  'zs':         {'min':  0.1, 'max':  5.0, 'bins': 20},
-                  'logmvir':    {'min': 11.5, 'max': 14.5, 'bins': 20},
-                  'mstar_nsig': {'min':   -3, 'max':    3, 'bins': 7},
-                  're_nsig':    {'min':   -3, 'max':    3, 'bins': 7},
-                  'pix_arc':    {'min':  np.log10(6*scale_factor),  
-                                 'max':  np.log10(110*scale_factor), 
-                                 'bins': 5}}
-    
-    #> setting up bins
-    for key in lookUpBins.keys():
-        
-        #> edges of the bins
-        if key in ['mstar_nsig', 're_nsig', 'pix_arc']: add = 0
-        else: add = 1
-        grid_edges  = np.linspace(lookUpBins[key]['min'], 
-                                  lookUpBins[key]['max'], 
-                                  lookUpBins[key]['bins'] + add)
-        
-        #> centers of the bins
-        grid_bins   = (grid_edges[:-1] + grid_edges[1:]) / 2
-        
-        #> saving depending on what grid
-        if key in ['mstar_nsig', 're_nsig', 'pix_arc']:
-            if key in ['pix_arc']: grid_edges = np.array([10**x for x in grid_edges])
-            lookUpBins[key]['grid'] = np.array([round(x,6) for x in grid_edges])
-        else:
-            lookUpBins[key]['grid'] = np.array([round(x,6) for x in grid_bins])
-    
-    return lookUpBins
-
-#> maximum quad cross section at given redshifts
-@lru_cache(maxsize=None)
-def max_darea(izl, izs,**kwargs):
-    df = load_model_table(int(izl))    # loads zl table
-    mask = (df['izs'] == int(izs) ) & (df['ER'] <= kwargs.get('max_er', 2.4)) # mask @ zs
-    return df.loc[mask,'d_area'].max() # finds maximum d_area
-
-
-""" #> FIRST LOOK SELEC FN ===========
-================================== """
-
-#> applys the 'first look' selection functions
-def firstLook_selFunc(df, **kwargs):
-    
-    #> kwargs
-    ER_resolution = kwargs.get('ER_resolution', 0.15) # min threshold [arcsec]
-    # max_er     = kwargs.get('max_er', 2.4)      # max ER for d_area normalization [arcsec]
-    
-    #> loading prior bins
-    lookUpBins = look_up_bins()
-    
-    #> translation dictionary (lookUpBins key to df key)
-    transDict = {'zl':         'zl',
-                 'zs':         'zs',
-                 'logmvir':    'log10_M_vir',
-                 'mstar_nsig': 'mstar_nsig',
-                 're_nsig':    're_nsig'}
-    
-    #> getting look-up indices
-    for key in lookUpBins.keys():
-        if key in ['pix_arc']: continue
-        df[f'i{key}'] = bin_indices(x = df[transDict[key]].to_numpy(),# sampled values
-                                    grid = lookUpBins[key]['grid'])   # prior bins
-    
-    #> loading look up tables
-    ERs, dareas, max_dareas, p_quads = [], [], [], []
-    for i in range(len(df)):
-        
-        #> getting galaxy
-        g = df.iloc[i]
-        
-        #> loading model
-        model = load_model(g['izl'], 
-                           g['izs'], 
-                           g['ilogmvir'], 
-                           g['imstar_nsig'], 
-                           g['ire_nsig'])
-        
-        ERs.append(model['ER'])
-        dareas.append(model['d_area'])
-        max_dareas.append(model['d_area_max'])
-        p_quads.append(model['p_quad'])
-    
-    #> adding to df
-    df['ER'] = ERs
-    df['d_area'] = dareas
-    df['d_area_max'] = max_dareas
-    df['p_quad'] = p_quads
-    
-    #> quad probability
-    # p_quad = (df['d_area'] / df['d_area_max']).clip(0,1).fillna(0)
-    
-    #> applying selection functions
-    df['sel'] = ((df['ER'] >= ER_resolution) &
-                 (np.random.random(len(df)) < df['p_quad']))
-    
-    return df
-
-
-""" #> PLOTTING ======================
-================================== """
-
-#> plotting various lookup table things
-def plot_lookup(df):
-    
     #> imports
-    import matplotlib.pyplot as plt
-    from matplotlib.cm import ScalarMappable
-    
-    #> color hist
-    if False:
-        #> initializing plot
-        fig, ax = plt.subplots(1,1,figsize=(6,6))
-        ax.grid(ls=':', alpha=0.5)
-        
-        #> declarations
-        p_param = 'p_quad'
-        
-        #> colormap
-        c_param = 'ER'
-        cmap = plt.get_cmap('RdYlBu')
-        norm = plt.Normalize(vmin=df[c_param].min(), vmax=df[c_param].max())
-        
-        #> initializing bins
-        num_bins = 10
-        bins = np.linspace(df[p_param].min(), df[p_param].max() + 0.001, num_bins + 1)
-        df['bin'] = np.digitize(df[p_param], bins)
-        
-        #> plotting
-        for bin_id, bin_df in df.groupby('bin'):
-            ax.imshow(bin_df[c_param].values.reshape(-1, 1), interpolation='nearest', cmap=cmap, norm=norm,
-                      extent=[bins[bin_id - 1], bins[bin_id], 0, len(bin_df)], aspect='auto')
-        
-        #> extra stuff
-        ax.set_xlabel(p_param)
-        ax.use_sticky_edges = False # remove stickiness due to imshow
-        ax.autoscale_view()
-        ax.set_ylim(ymin=0)
-        
-        plt.colorbar(ScalarMappable(norm=norm, cmap=cmap), label=c_param, ax=ax)
-        plt.tight_layout()
-        plt.show()
-        
-    #> two params against each other
-    if True:
-        
-        #> declarations
-        x_param = 'd_area_max'
-        y_param = 'd_area'
-        
-        print(df[df[y_param]==df[y_param].min()].to_string())
-        
-        #> initializing plot
-        fig, ax = plt.subplots(1,1,figsize=(6,6))
-        ax.grid(ls=':', alpha=0.5)
-        ax.set_xlabel(x_param, fontsize=fontsize, labelpad=labelpad)
-        ax.set_ylabel(y_param, fontsize=fontsize, labelpad=labelpad)
-        
-        #> plotting
-        ax.scatter(np.log10(df[x_param]), np.log10(df[y_param]), alpha=0.6)
-        
-        #> line
-        xmin, xmax = ax.get_xlim()
-        x = np.linspace(xmin, xmax, 1000)
-        ax.plot(np.log10(x), np.log10(x), ls=':', c='k', alpha=0.4)
-    
-        plt.show()
-        
-    return
+    import modules.error as error
+
+    #> checking mdef
+    if mdef not in lookup_locs_newt:
+        error.phrase(f"mdef={mdef} not understood. Please use 'vir' or '200c'")
+
+    #> checking tables
+    if not complete_newt(lookup_locs_newt[mdef]):
+        error.phrase(f'newt look-up tables for mdef={mdef} not finished in {lookup_locs_newt[mdef]}. Run priors/genlookup_newt.py --mdef {mdef}')
+
+    return lookup_locs_newt[mdef]
 
 
-""" #> V3 LOOK-UP TABLES =============
+#> file of one zl table
+def table_file(loc, zl):
+    return os.path.join(loc, f'model_zl_{zl:.2f}.parquet')
+
+
+""" #> LOADING =======================
 ================================== """
 
-#> v3 look-up tables for each halo mass definition
-lookup_locs_v3   = {'vir':  './priors/look_up_tables_v3_vir/',   # nfw w/ delta_vir   (not generated yet)
-                    '200c': './priors/look_up_tables_v3_200c/'}  # nfw w/ delta = 200 (not generated yet)
-lookup_legacy_v3 = './priors/look_up_tables_v3/'                 # original v3 tables (delta = 200, c from the c_vir relation)
-
-#> look-up directory for a halo mass definition (falls back to the original v3 tables if not generated)
-def lookup_dir_v3(mdef='vir'):
-    
-    #> checking mdef
-    if mdef not in lookup_locs_v3:
-        import modules.error as error
-        error.phrase(f"mdef={mdef} not understood. Please use 'vir' or '200c'")
-    
-    #> tables for mdef
-    if os.path.isfile(os.path.join(lookup_locs_v3[mdef], 'lookup_grid_v3.json')): return lookup_locs_v3[mdef]
-    
-    #> fallback (warns once per mdef)
-    if mdef not in lookup_dir_v3.warned:
-        import modules.error as error
-        error.highlight(f'No v3 look-up tables for mdef={mdef} in {lookup_locs_v3[mdef]}; using {lookup_legacy_v3} (delta=200, c_vir)')
-        lookup_dir_v3.warned.add(mdef)
-    return lookup_legacy_v3
-lookup_dir_v3.warned = set()
-
-#> loads v3 look-up bins
-@lru_cache(maxsize=1)
-def load_lookup_grid_v3(loc='./priors/look_up_tables_v3/'):
+#> loads newt look-up bins
+@lru_cache(maxsize=None)
+def load_lookup_grid_newt(loc=lookup_locs_newt['vir']):
 
     #> loading metadata
-    with open(os.path.join(loc,'lookup_grid_v3.json')) as f:
-        meta = json.load(f)
+    with open(os.path.join(loc, gridFile)) as f: meta = json.load(f)
 
-    #> grids
-    bins = {'zl':         np.asarray(meta['zl_grid']),
-            'zs':         np.asarray(meta['zs_grid']),
-            'logmvir':    np.asarray(meta['logmvir_grid']),
-            'mstar_nsig': np.asarray(meta['mstar_nsig_grid']),
-            're_nsig':    np.asarray(meta['re_nsig_grid'])}
+    return {key: np.asarray(meta[f'{key}_grid']) for key in gridKeys}
 
-    return bins
 
-#> preloads all v3 look-up tables
-def preload_lookup_v3(loc='./priors/look_up_tables_v3/', verbose=False):
+#> largest quad area w/ ER <= max_er @ each zs [arcsec^2]
+def quad_area_max(df, max_er=2.4):
 
-    #> timing
-    if verbose:
-        import time
-        srt = time.time()
+    #> declarations
+    q_area_max = pd.Series(np.nan, index=df.index)
 
-    #> loading bins
-    bins = load_lookup_grid_v3(loc)
+    #> each zs
+    for izs in df['izs'].unique():
+        mask = (df['izs'] == int(izs) ) & (df['ER'] <= max_er) # mask @ zs
+        q_area_max[df['izs'] == izs] = df.loc[mask,'q_area'].max()
 
-    #> loading every zl table into cache
-    for izl in range(len(bins['zl'])):
-        load_model_table_v3(izl,loc)
+    return q_area_max
 
-    #> timing
-    if verbose:
-        print(f'look-up tables loaded in {time.time()-srt:.3f} s')
 
-    return None
-
-#> loads one zl look-up table
+#> loads one zl look-up table (ER, q_area, q_area_max, r_area, t_area)
 @lru_cache(maxsize=None)
-def load_model_table_v3(izl, loc='./priors/look_up_tables_v3/'):
+def load_model_table_newt(izl, loc=lookup_locs_newt['vir'], max_er=2.4):
 
     #> lens redshift
-    zl = load_lookup_grid_v3(loc)['zl'][izl]
+    zl = load_lookup_grid_newt(loc)['zl'][izl]
 
     #> loading needed columns
-    fileName = os.path.join(loc,f'model_zl_{zl:.2f}.parquet')
-    table = pd.read_parquet(fileName, columns=['ER','d_area','d_area_max'])
+    df = pd.read_parquet(table_file(loc, zl), columns=['izs','ER','q_area','r_area','t_area'])
 
-    return table.to_numpy()
+    #> normalization
+    df['q_area_max'] = quad_area_max(df, max_er)
 
+    return df[valCols].to_numpy()
+
+
+""" #> AXIS-RATIO CORRECTIONS ========
+================================== """
+
+#> loads the f(q, log10 rho) fits
+@lru_cache(maxsize=None)
+def load_qfactor(loc=qfactor_loc):
+
+    #> imports
+    from scipy.interpolate import RegularGridInterpolator as rgi
+
+    #> fits
+    with open(loc) as f: fit = json.load(f)
+    q, lrho = np.asarray(fit['q']), np.asarray(fit['lrho'])
+
+    return {'q':        q,
+            'lrho':     lrho,
+            'f_ER':     rgi((q, lrho), np.asarray(fit['f_ER'])),      # ER(q)/ER(q_ref)
+            'f_q_area': rgi((q, lrho), np.asarray(fit['f_q_area']))}  # q_area(q)/q_area(q_ref)
+
+
+#> f_ER, f_q_area at axis ratio q and rho = r_area/t_area (at q_ref); clipped to the calibrated range
+def q_factors(q, rho, loc=qfactor_loc):
+
+    #> fits
+    qf = load_qfactor(loc)
+
+    #> points (clipped)
+    q    = np.clip(q, qf['q'][0], qf['q'][-1])
+    lrho = np.clip(np.log10(rho), qf['lrho'][0], qf['lrho'][-1])
+    pts  = np.column_stack((q, lrho))
+
+    return qf['f_ER'](pts), qf['f_q_area'](pts)
+
+
+#> largest f_q_area at q (over rho), so p_quad <= 1 for every galaxy
+def q_factor_max(q, loc=qfactor_loc):
+
+    #> fits
+    qf  = load_qfactor(loc)
+    rho = 10**qf['lrho']
+
+    #> f_q_area at every rho bin
+    f_q = q_factors(np.full(len(rho), q), rho, loc)[1]
+
+    return float(np.max(f_q))
+
+
+#> corrected ER [arcsec], q_area + q_area_max [arcsec^2] for the galaxies' axis ratios
+def q_correct(vals, q, q_min=None):
+
+    #> unpacking
+    ER, q_area, q_area_max, r_area, t_area = vals.T
+
+    #> rho = r_area/t_area (at q_ref)
+    rho = np.divide(r_area, t_area, out=np.ones_like(t_area), where=t_area > 0)
+
+    #> corrections
+    f_ER, f_q = q_factors(q, rho)
+    q_low     = load_qfactor()['q'][0] if q_min is None else q_min
+
+    return ER*f_ER, q_area*f_q, q_area_max*q_factor_max(q_low)
+
+
+""" #> INTERPOLATION =================
+================================== """
 
 #> grid indices and weights
-def _grid_v3(x, grid, interp=True):
+def _grid_newt(x, grid, interp=True):
 
     #> below grid
     if x <= grid[0]:
@@ -406,107 +218,134 @@ def _grid_v3(x, grid, interp=True):
     return ((i0,1-w),(i1,w))
 
 
-#> applies v3 first-look selection
-def firstLook_selFunc_v3(df, **kwargs):
+#> interpolation flags per axis (zl, zs nearest; masses + sizes interpolated)
+def interp_flags(**kwargs):
+    return {'zl':         kwargs.get('interp_zl',    False),
+            'zs':         kwargs.get('interp_zs',    False),
+            'logmvir':    kwargs.get('interp_mvir',  True),
+            'mstar_nsig': kwargs.get('interp_mstar', True),
+            're_nsig':    kwargs.get('interp_re',    True)}
 
-    #> kwargs
-    ER_resolution = kwargs.get('ER_resolution', 0.15)
-    nph = kwargs.get('nph', 50)
-    r_pix_percentage = kwargs.get('r_pix_percentage', 0.5)
-    loc = kwargs.get('lookup_loc', lookup_dir_v3(kwargs['mdef']) if 'mdef' in kwargs else lookup_legacy_v3)
 
-    #> interpolation
-    interp_zl    = kwargs.get('interp_zl',   False)
-    interp_zs    = kwargs.get('interp_zs',   False)
-    interp_mvir  = kwargs.get('interp_mvir', True)
-    interp_mstar = kwargs.get('interp_mstar',True)
-    interp_re    = kwargs.get('interp_re',   True)
-
-    #> grids
-    bins = load_lookup_grid_v3(loc)
+#> interpolated table values of one galaxy
+def interp_galaxy(galaxy, bins, flags, loc, max_er=2.4):
 
     #> dimensions
     nmvir  = len(bins['logmvir'])
     nmstar = len(bins['mstar_nsig'])
     nre    = len(bins['re_nsig'])
 
-    #> galaxy parameters
-    galaxies = df[['zl',
-                   'zs',
-                   'log10_M_vir',
-                   'mstar_nsig',
-                   're_nsig']].to_numpy()
+    #> indices and weights per axis
+    inds = [_grid_newt(x, bins[key], flags[key]) for x, key in zip(galaxy, gridKeys)]
 
-    #> declarations
-    vals = np.zeros((len(df),3))
+    #> surrounding points
+    val = np.zeros(len(valCols))
+    for (izl,wz),(izs,ws),(ih,wh),(im,wm),(ir,wr) in product(*inds):
 
-    #> look-up
-    for i, (zl, zs, logmvir, mstar_nsig, re_nsig) in enumerate(galaxies):
+        #> total weight
+        w = wz*ws*wh*wm*wr
 
-        #> indices and weights
-        zinds = _grid_v3(zl,bins['zl'], interp_zl)
-        sinds = _grid_v3(zs,bins['zs'], interp_zs)
-        hinds = _grid_v3(logmvir,bins['logmvir'], interp_mvir)
-        minds = _grid_v3(mstar_nsig,bins['mstar_nsig'], interp_mstar)
-        rinds = _grid_v3(re_nsig,bins['re_nsig'], interp_re)
+        #> flattened row
+        ind = (((izs*nmvir + ih)*nmstar + im)*nre + ir)
 
-        #> surrounding points
-        for (izl,wz),(izs,ws),(ih,wh),(im,wm),(ir,wr) in product(zinds,sinds,hinds,minds,rinds):
+        #> adding point
+        val += w*load_model_table_newt(izl,loc,max_er)[ind]
 
-            #> total weight
-            w = wz*ws*wh*wm*wr
+    return val
 
-            #> flattened row
-            ind = (((izs*nmvir + ih)*nmstar + im)*nre + ir)
 
-            #> adding point
-            vals[i] += w*load_model_table_v3(izl,loc)[ind]
+#> interpolated table values of every galaxy (rows: galaxies, columns: valCols)
+def interp_galaxies(df, loc, **kwargs):
 
-    #> unpacking
-    ER = vals[:,0]
-    d_area = vals[:,1]
-    d_area_max = vals[:,2]
+    #> kwargs
+    max_er = kwargs.get('max_er', 2.4)      # max ER for area normalization [arcsec]
 
-    #> quad probability
-    p_quad = np.divide(d_area, d_area_max,
-                       out=np.zeros_like(d_area),
-                       where=d_area_max > 0)
+    #> grids + flags
+    bins  = load_lookup_grid_newt(loc)
+    flags = interp_flags(**kwargs)
 
-    p_quad = np.clip(p_quad,0,1)
+    #> galaxies
+    galaxies = df[galCols].to_numpy()
 
-    #> pixel scale
-    pix_arc = np.divide(nph*r_pix_percentage, ER,
-                        out=np.full_like(ER,np.nan),
-                        where=ER > 0)
+    return np.array([interp_galaxy(g, bins, flags, loc, max_er) for g in galaxies]).reshape(-1, len(valCols))
 
-    #> saving
-    df['ER'] = ER
-    df['d_area'] = d_area
-    df['d_area_max'] = d_area_max
-    df['p_quad'] = p_quad
-    df['pix_arc'] = pix_arc
 
-    #> selection (selDict from params.getSelDict, otherwise the older sel_res / sel_slcs kwargs)
+""" #> SELECTION =====================
+================================== """
+
+#> quad probability (q_area / q_area_max, clipped to [0, 1])
+def quad_probability(q_area, q_area_max):
+
+    p_quad = np.divide(q_area, q_area_max,
+                       out=np.zeros_like(q_area),
+                       where=q_area_max > 0)
+
+    return np.clip(p_quad,0,1)
+
+
+#> pixel scale [pix/arcsec] that puts the ER at r_pix_percentage of nph
+def pixel_scale(ER, nph=50, r_pix_percentage=0.5):
+    return np.divide(nph*r_pix_percentage, ER,
+                     out=np.full_like(ER,np.nan),
+                     where=ER > 0)
+
+
+#> selection (selDict from params.getSelDict, otherwise the older sel_res / sel_slcs kwargs)
+def selection(ER, p_quad, **kwargs):
+
+    #> kwargs
+    ER_resolution = kwargs.get('ER_resolution', 0.15)
     selDict = kwargs.get('selDict', None) or {'res':  {'on': kwargs.get('sel_res', True), 'ER_resolution': ER_resolution},
                                               'slcs': {'on': kwargs.get('sel_slcs', True)}}
     sel_res = selDict['res']['on']
     sel_slcs = selDict['slcs']['on']
     ER_resolution = selDict['res'].get('ER_resolution', ER_resolution)
-    
+
     #> no selection
     if not sel_res and not sel_slcs:
-        df['sel'] = np.ones(len(df), dtype=bool)
-    
+        return np.ones(len(ER), dtype=bool)
+
     #> selection effects
     if sel_res and sel_slcs:
-        df['sel'] = ((ER >= ER_resolution) & np.isfinite(ER) &
-                     (np.random.random(len(df)) < p_quad))
-    
+        return ((ER >= ER_resolution) & np.isfinite(ER) &
+                (np.random.random(len(ER)) < p_quad))
+
     if sel_res and not sel_slcs:
-        df['sel'] = ((ER >= ER_resolution) & np.isfinite(ER))
-        
-    if not sel_res and sel_slcs:
-        df['sel'] = ((np.random.random(len(df)) < p_quad))
+        return ((ER >= ER_resolution) & np.isfinite(ER))
+
+    return (np.random.random(len(ER)) < p_quad)
+
+
+""" #> FIRST LOOK ====================
+================================== """
+
+#> applies newt first-look selection
+def firstLook_selFunc_newt(df, **kwargs):
+
+    #> kwargs
+    nph = kwargs.get('nph', 50)
+    r_pix_percentage = kwargs.get('r_pix_percentage', 0.5)
+    q_min = kwargs.get('q_min', None)       # lower edge of the axis-ratio prior (p_quad normalization), None = calibrated min
+    loc = kwargs['lookup_loc'] if 'lookup_loc' in kwargs else lookup_dir_newt(kwargs.get('mdef', 'vir'))
+
+    #> look-up
+    vals = interp_galaxies(df, loc, **kwargs)
+    ER, q_area, q_area_max = vals[:,0], vals[:,1], vals[:,2]
+
+    #> axis-ratio corrections (galaxies w/ a drawn axis ratio)
+    if 'axisrat' in df: ER, q_area, q_area_max = q_correct(vals, df['axisrat'].to_numpy(dtype=float), q_min)
+
+    #> quad probability + pixel scale
+    p_quad  = quad_probability(q_area, q_area_max)
+    pix_arc = pixel_scale(ER, nph, r_pix_percentage)
+
+    #> saving
+    df['ER'] = ER
+    df['q_area'] = q_area
+    df['q_area_max'] = q_area_max
+    df['p_quad'] = p_quad
+    df['pix_arc'] = pix_arc
+    df['sel'] = selection(ER, p_quad, **kwargs)
 
     return df
 
@@ -516,19 +355,13 @@ def firstLook_selFunc_v3(df, **kwargs):
 
 #> main function
 if __name__ == '__main__':
-    
+
     #> name
-    import os
     print('> '+os.path.basename(__file__))
-    
-    #> loading models
-    zl = 0.55
-    izs = 1
-    ilogmvir = 1
-    ilogmstar = 1
-    ire = 1
-    data = load_model(zl, izs, ilogmvir, ilogmstar, ire)
-    print(data)
-    
+
+    #> finished tables
+    for mdef, loc in lookup_locs_newt.items():
+        print(f'>   mdef={mdef}: {loc} finished = {complete_newt(loc)}')
+
     # end
 # thank

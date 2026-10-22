@@ -46,7 +46,7 @@ def grid_radialprof(kappa, R_eff, pix_arc, zl, **kwargs):
     interp = kwargs.get('interp', 1)                    # how file to interpolate (1, 2, etc.)
     plot = kwargs.get('plot', False)                    # plot flag
     outFile = kwargs.get('outFile', False)              # where to save file
-    center = kwargs.get('center', ((nx-1)/2, (ny-1)/2)) # center of summation
+    center = kwargs.get('center', (nph, nph))           # center of summation (theta=0 on the np.arange(-nph, nph) grid)
     
     #> checking for errors
     if nx != ny: error.phrase('kappa grid is not square')
@@ -116,8 +116,14 @@ def grid_radialprof(kappa, R_eff, pix_arc, zl, **kwargs):
     
     #> removing small radii
     percent = 10
-    log10Rmin = (1-percent/100) * np.log10(R_eff_arc)
-    log10Rmax = (1+percent/100) * np.log10(R_eff_arc)
+    
+    #> checking that the fit window (up to 1.1 R_eff) is inside the grid (largest full circle)
+    r_grid = nph / pix_arc                                            # arcsec
+    if (1+percent/100) * np.max(R_eff_arc) > r_grid:
+        error.highlight(f'R_eff = {float(np.max(R_eff_arc)):.2f} arcsec is not within the grid (half-width = {r_grid:.2f} arcsec); increase nph')
+        return r_arc, kappa_2d_r, np.nan, np.nan
+    log10Rmin = np.log10((1-percent/100) * R_eff_arc)
+    log10Rmax = np.log10((1+percent/100) * R_eff_arc)
     log_r_arc = np.log10(r_arc)
     print(log_r_arc)
     print(log10Rmin, log10Rmax)
@@ -151,12 +157,77 @@ def grid_radialprof(kappa, R_eff, pix_arc, zl, **kwargs):
     return r_arc, kappa_2d_r, gamma, norm
 
 
-#> calculates the radial profile of a lens analytically (from a much finer grid)
+#> calculates the radial profile of a lens analytically (circle sampling, no grid)
+#> kappa is averaged around circles of radius r centered on the hernquist profile, then fit over [rmin, rmax]*R_eff
 def analytic_radialprof(bprofiles, **kwargs):
     
+    #> imports
+    import profiles
     
+    #> kwargs
+    rmin    = kwargs.get('rmin', 0.5)       # inner edge of the fit window [R_eff]
+    rmax    = kwargs.get('rmax', 2.0)       # outer edge of the fit window [R_eff]
+    nr      = kwargs.get('nr', 50)          # number of radii (log-spaced)
+    ntheta  = kwargs.get('ntheta', 64)      # number of angles per circle
+    plot    = kwargs.get('plot', False)     # plot flag
+    outFile = kwargs.get('outFile', None)   # where to save file
     
-    return
+    #> one galaxy --> list
+    if isinstance(bprofiles, dict): bprofiles = [bprofiles]
+    numGals = len(bprofiles)
+    
+    #> declarations
+    th      = np.linspace(0, 2*np.pi, ntheta, endpoint=False)               # rad
+    r_arc   = np.zeros((numGals, nr))                                        # arcsec
+    kappa_r = np.zeros((numGals, nr))                                        # --
+    gamma   = np.zeros(numGals)                                              # slope of log kappa vs log r
+    norm    = np.zeros(numGals)                                              # intercept
+    
+    #> iterating thru galaxies
+    for i, b in enumerate(bprofiles):
+        
+        #> effective radius + center (hernquist profile)
+        hern   = b['hern'][0]
+        R_eff  = (hern['effrad'] / 1000) / cosmology.angDist(0, b['zl']) * u.arc_rad # kpc --> arcsec
+        x0, y0 = hern.get('x0', 0.0), hern.get('y0', 0.0)                   # arcsec
+        
+        #> circles of radius r (log-spaced over the fit window)
+        r = R_eff * np.logspace(np.log10(rmin), np.log10(rmax), nr)          # arcsec
+        x = x0 + r[:,None]*np.cos(th)[None,:]                                # arcsec, (nr, ntheta)
+        y = y0 + r[:,None]*np.sin(th)[None,:]                                # arcsec, (nr, ntheta)
+        
+        #> kappa on each circle (analytic jacobian), averaged over angle
+        _, _, axx, _, _, ayy = profiles.alpha_jac_points(x, y, b)
+        kappa = 0.5*(axx + ayy)                                              # (nr, ntheta)
+        
+        #> saving + power-law fit
+        r_arc[i], kappa_r[i] = r, kappa.mean(axis=1)
+        gamma[i], norm[i] = radialprof_slope(np.log10(r_arc[i]), np.log10(kappa_r[i]))
+    
+    #> plotting (first 10 galaxies)
+    if plot:
+        
+        #> initializing plot
+        fig, ax = plt.subplots(1,1,figsize=(6,6))
+        ax.grid(ls=':', alpha=0.5)
+        ax.set_title('Circularly Averaged Kappa', fontsize=fontsize, fontweight='bold')
+        ax.set_xlabel(r'$\mathbf{log_{10} r ~[arcsec]}$', fontsize=fontsize, labelpad=labelpad)
+        ax.set_ylabel(r'$\mathbf{log_{10} \kappa(r)}$', fontsize=fontsize, labelpad=labelpad)
+        
+        #> plotting!
+        for i in range(min(numGals, 10)):
+            lr = np.log10(r_arc[i])
+            ax.plot(lr, np.log10(kappa_r[i]), lw=4, alpha=0.5, c=f'C{i}')
+            ax.plot(lr, gamma[i]*lr + norm[i], ls=':', lw=2, c=f'C{i}', label=r'$\gamma=$'+f'{gamma[i]:.2f}')
+        
+        ax.legend(fontsize=fontsize)
+        
+        #> saving and closing
+        if outFile is not None: 
+            plt.savefig(fig_loc + outFile + '.png', dpi=dpi, bbox_inches='tight')
+        plt.show()
+    
+    return r_arc, kappa_r, gamma, norm # arcsec, --, --, --
 
 
 """ #> BATCH FROM FILE ===============
@@ -167,7 +238,6 @@ def batchRadialProfs(folder, **kwargs):
     
     #> imports
     import glob
-    import generate
     
     #> kwargs
     plot = kwargs.get('plot', False)
@@ -190,20 +260,9 @@ def batchRadialProfs(folder, **kwargs):
     redshifts = np.array(redshifts)
     R_effs = np.array(R_effs)
     
-    #> generating galaxies
-    lenses, bprofiles = generate.genGalPop(redshifts, bprofiles=bprofiles)
-    xgrid, ygrid, delx, dely, lamt = lenses
-    
-    #> calculating power-law slopes
-    slopes = np.zeros(shape=(len(delx),1))
-    for i, delx_, dely_, R_eff in zip(range(len(slopes)), delx, dely, R_effs):
-        kappa = lensing.angles_to_kappa(delx_, dely_, bprofiles[i]['pix_arc'])
-        r_arc, kappa_2d_r, gamma, norm = grid_radialprof(kappa=kappa, 
-                                                         R_eff=R_eff, 
-                                                         pix_arc=bprofiles[i]['pix_arc'], 
-                                                         zl=bprofiles[i]['zl'],
-                                                         plot=False)
-        slopes[i] = gamma
+    #> calculating power-law slopes (analytic, circle sampling)
+    _, _, gamma, _ = analytic_radialprof(bprofiles, **(kwargs | {'plot': False}))
+    slopes = gamma[:,None]
         
     #> plotting
     if plot:
@@ -233,17 +292,16 @@ if __name__ == '__main__':
     print('> '+os.path.basename(__file__))
     
     import generate
-    import lensing
+    import params
     import plot
     
     if False:
-        data, paramRanges = generate.genGal(redshifts=(0.5, 1.0), 
-                                            galProfiles=generate.galProfiles(mult=[], ex=False))
-        xgrid, ygrid, xdef, ydef, lamt = data
-        kappa = lensing.angles_to_kappa(xdef, ydef, paramRanges['pix_arc'])
-        plot.kappa(xgrid, ygrid, xdef, ydef, paramRanges['pix_arc'])
+        bprof = params.bprofiles(1, ranges=params.toggleParams(generate.galProfiles(mult=[], ex=False)), 
+                                 redshifts=np.array([[0.5, 1.0]]))[0]
+        kappa = plot.lensMaps(bprof)['kappa']
+        plot.kappa(bprof)
         
-        grid_radialprof(kappa, paramRanges['pix_arc'], paramRanges['zl'], plot=True)
+        grid_radialprof(kappa, bprof['hern'][0]['effrad'], bprof['pix_arc'], bprof['zl'], plot=True)
     
     folder = './data/+unsorted/26081312592309/'
     batchRadialProfs(folder, plot=True)

@@ -1,0 +1,30 @@
+#!/bin/bash -l
+#SBATCH --job-name=newt_tables
+#SBATCH --array=0-1
+#SBATCH --time=08:00:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=128
+#SBATCH --mem=128g
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=mill9614@umn.edu
+
+#> opus root (submit from opus/ or opus/batch_files/)
+cd "$SLURM_SUBMIT_DIR"
+[ -d priors ] || cd ..
+
+#> environment
+module load python3
+source activate millcpu
+
+#> one thread per worker
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+
+#> checking packages (shapely: caustic overlaps, parquet engine: tables)
+python -c "import shapely, colossus, pandas; pandas.io.parquet.get_engine('auto')" || exit 1
+
+#> mdef for this array task
+MDEFS=(vir 200c)
+MDEF=${MDEFS[$SLURM_ARRAY_TASK_ID]}
+
+#> tables
+python -u priors/genlookup_newt.py --mdef $MDEF --workers $SLURM_CPUS_PER_TASK

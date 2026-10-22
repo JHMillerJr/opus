@@ -1,0 +1,2 @@
+zl,n_both_valid,n_new_valid,n_old_valid,ER_median_rel,ER_median_abs_rel,ER_within_2pct,ER_within_5pct,t_area_vs_d_area_median_rel,t_area_vs_d_area_median_abs_rel,t_area_within_7pct,nc_area_nonzero_frac,no_rcurve_frac
+0.52903195,34855,36350,35689,0.002285709745245655,0.0025886924210079716,0.9979056089513699,0.9998278582699757,-0.678748431334142,0.678748431334142,0.0,0.32537656003442833,0.0

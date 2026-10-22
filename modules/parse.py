@@ -135,73 +135,118 @@ def fromNPYtoDF(fileName, observables=['t12', 't23', 't34', 'd2/d1', 'd3/d1' ,'d
     return df, data
 
 
-#> loading in npy files from parent dir
-def fromDIRtoDFs(dirPath, verbose=False, **kwargs):
-    
-    #> declarations
-    keywords = np.array(['images', 'obs', 'mags', 'srcs', 'lens', 'bprofiles'])
+#> loads every file in a generate.save() folder: <dirPath>/<fileName>_<key>.npy (+ <fileName>_df.csv)
+#> returns a dict keyed by the file ending: images, obs, mags, delays, srcs, nims, flag, gal, bprofiles, paramRanges, df, ...
+def load(dirPath, verbose=False, **kwargs):
     
     #> unpacking kwargs
-    requested_keys = kwargs.get('keys', None)
-    if requested_keys is not None: 
-        requested_keys = np.array(requested_keys)
-        error_keys = requested_keys[[ x not in keywords for x in requested_keys ]]
-        if error_keys.size > 0: error.phrase(f'Could not find files with names containing {error_keys} in {dirPath}')
+    requested_keys = kwargs.get('keys', None)   # only load these keys (default: every file)
     
     #> formatting
+    dirPath = str(dirPath).replace('\\', '/')
     if dirPath[-1] != '/': dirPath += '/'
     
     #> ensuring that folder exists
     if not os.path.isdir(dirPath): error.phrase(f'{dirPath} does not exist')
         
-    #> seeing what npy files exist in dir
-    files = glob.glob(dirPath + '*.npy')
-    if len(files) == 0: error.phrase(f'Could not find any .npy files in {dirPath}')
+    #> seeing what npy + csv files exist in dir
+    files = sorted(glob.glob(dirPath + '*.npy') + glob.glob(dirPath + '*.csv'))
+    if len(files) == 0: error.phrase(f'Could not find any .npy or .csv files in {dirPath}')
     
-    #> looking for keywords
-    organized_files, misc_files = {}, []
+    #> key = file ending after the last '_' (the fileName itself may contain '_' from its suffix)
+    organized_files = {}
     for file in files:
-        
-        #> adjusting formatting
-        file = file.replace('\\', '/')
-        
-        #> finding key
-        key = keywords[[ x in file for x in keywords ]]
-        
-        #> organizing
-        if key.size == 0: misc_files.append(file) # saving if no key
-        else: organized_files[str(key[0])] = file # saving if key
-        
-    #> declaration (dictionary containing data products)
-    dfs = {}
+        stem = os.path.splitext(os.path.basename(file))[0]
+        key  = stem.rsplit('_', 1)[-1]
+        if key in organized_files: error.highlight(f'More than one file ending in _{key} in {dirPath}, keeping {os.path.basename(file)}')
+        organized_files[key] = file
     
     #> reducing to only requested if requested
     if requested_keys is not None:
-        
-        #> iterating thru requested keys
-        for key in requested_keys:
-            dfs[key] = np.load(organized_files[key], allow_pickle=True)    
-        
-    else: # if not requesting, return all
-
-        #> iterating thru organized keys
-        for key in organized_files:
-            dfs[key] = np.load(organized_files[key], allow_pickle=True)    
-        
-        #> adding un-organized flies
-        for file in misc_files:
-            fileName = file.split('/')[-1][:-4] # getting raw fileName
-            dfs[fileName] = np.load(file, allow_pickle=True)    
+        missing = [key for key in requested_keys if key not in organized_files]
+        if len(missing) > 0: error.phrase(f'Could not find files ending in {missing} in {dirPath}')
+        organized_files = {key: organized_files[key] for key in requested_keys}
+    
+    #> loading (csv --> dataframe, dict saved as npy --> dict)
+    dfs = {}
+    for key, file in organized_files.items():
+        if file.endswith('.csv'): dfs[key] = pd.read_csv(file); continue
+        data = np.load(file, allow_pickle=True)
+        dfs[key] = data.item() if (data.dtype == object and data.ndim == 0) else data
 
     #> if verbose
     if verbose:
-        keys = [ str(x) for x in list(dfs.keys())]
-        print(f'> The keys for {dirPath} are {keys}')
+        for key in dfs: print(f'> {key:12s}: {getattr(dfs[key], "shape", type(dfs[key]).__name__)}')
         
-    #> error checking
-    if len(dfs.keys()) == 0: error.phrase(f'Dataframe from {dirPath} contains no keys')
-    
     return dfs
+
+
+""" #> GEN OUTPUT ====================
+================================== """
+
+#> key of galaxy
+def bnum(i, numGals):
+    return str(i+1).zfill(max(4, len(str(numGals))))
+
+#> converst gen() output split by galaxy ('0001', '0002', ...) to one row per source
+#> keys: images, mags, delays, srcs, nims, flag, gal, obs, bprofiles (+ paramRanges, df)
+def stack(out, **kwargs):
+    
+    #> imports
+    import newtlens
+    
+    #> kwargs
+    paramRanges = kwargs.get('paramRanges', None)   # galaxy params
+    df          = kwargs.get('df', True)            # bprofiles as a dataframe (_df.csv)
+    
+    #> galaxies in order + common width
+    gals = [out[k] for k in sorted(out.keys())]
+    w    = max(o['mu'].shape[1] for o in gals)
+    
+    #> one row per source
+    data = {'images': np.concatenate([newtlens.pad(g['images'], w) for g in gals]),  # (N, w, 2) arcsec
+            'mags':   np.concatenate([newtlens.pad(g['mu'], w) for g in gals]),      # (N, w) signed mags
+            'delays': np.concatenate([newtlens.pad(g['delays'], w) for g in gals]),  # (N, w) days
+            'srcs':   np.concatenate([g['srcs'] for g in gals]),                     # (N, 2) arcsec
+            'nims':   np.concatenate([g['nims'] for g in gals]),                     # (N,)
+            'flag':   np.concatenate([g['flag'] for g in gals]),                     # (N,)
+            'gal':    np.concatenate([np.full(len(g['nims']), i) for i, g in enumerate(gals)])} # (N,) index into bprofiles
+    if all('obs' in g for g in gals): data['obs'] = np.concatenate([g['obs'] for g in gals]) # (N, numObs)
+    
+    #> galaxy info (one per galaxy)
+    data['bprofiles'] = np.array([g['bprof'] for g in gals], dtype=object)
+    if paramRanges is not None: data['paramRanges'] = paramRanges
+    if df: data['df'] = bprof_to_df(bprofiles=data['bprofiles'])
+    
+    return data
+
+#> converts one row per source to gen() output split by galaxy ('0001', '0002', ...)
+def unstack(data):
+    
+    #> declarations
+    numGals = len(data['bprofiles'])
+    keys    = {'images': 'images', 'mu': 'mags', 'srcs': 'srcs', 'nims': 'nims',
+               'flag': 'flag', 'delays': 'delays', 'obs': 'obs'}
+    
+    #> iterating thru galaxies
+    out = {}
+    for i in range(numGals):
+        
+        #> sources of this galaxy + its width (max(jmax=5, nims), as in newtlens.find_images)
+        m = data['gal'] == i
+        w = max(5, int(data['nims'][m].max(initial=0))) if 'nims' in data else None
+        
+        #> splitting (image-slot arrays trimmed back to this galaxy's width)
+        o = {}
+        for key, skey in keys.items():
+            if skey not in data: continue
+            o[key] = data[skey][m][:,:w] if key in ['images', 'mu', 'delays'] else data[skey][m]
+        o['bprof'] = data['bprofiles'][i]
+        
+        #> saving
+        out[bnum(i, numGals)] = o
+    
+    return out
 
 
 """ #> WRITE FNS =====================
@@ -230,6 +275,7 @@ def toPickle(fileName, cucumber):
     print(f'> Created pickle @ {fileName}')
     return
 
+
 """ #> BPROFILES TO DF ===============
 ================================== """
 
@@ -250,7 +296,7 @@ def load_bprofiles(fileName, input='csv'):
     error.phrase(f'load_bprofiles() does not understand input={input}')
     return
 
-#> summarizing bprofiles to bprofiles
+#> summarizing bprofiles to df
 def bprof_to_df(bprofiles=None, fileName='', save=False, outFile='bprofiles_df.csv'):
     
     #> checking to ensure at least one thing is provided
@@ -260,23 +306,17 @@ def bprof_to_df(bprofiles=None, fileName='', save=False, outFile='bprofiles_df.c
     #> loading if given file
     if fileName != '': bprofiles = np.load(fileName, allow_pickle=True)
     
-    #> declarations
-    df = pd.DataFrame()
-    
-    #> bprofiles should be defined by now
-    columns = []
+    #> bprofiles should be defined by now (one row per galaxy, values keep their type)
+    rows = []
     for i, b in enumerate(bprofiles):
         
-        #> declarations
-        dummy = []
-        
         #> getting column names
+        row = {}
         for key in b.keys():
             
-            #> if singular value
-            if isinstance(b[key], float): 
-                if i == 0: columns.append(key)
-                dummy.append(b[key])
+            #> if singular value (float, int, ...)
+            if np.isscalar(b[key]): 
+                row[key] = b[key]
                 continue
             
             #> iterating through dictionaries
@@ -288,13 +328,13 @@ def bprof_to_df(bprofiles=None, fileName='', save=False, outFile='bprofiles_df.c
                     else: key_ = key
                     
                     #> appending
-                    dummy.append(array[sub_key])
-                    if i == 0: columns.append(f'{key_}_{sub_key}')
-        columns = np.array(columns)
-        dummy = np.array(dummy)
+                    row[f'{key_}_{sub_key}'] = array[sub_key]
         
-        #> appending to dataframe
-        df.loc[i, columns] = dummy
+        #> appending to rows
+        rows.append(row)
+    
+    #> dataframe
+    df = pd.DataFrame(rows)
     
     # print(df.to_string())
     if save:
@@ -386,7 +426,7 @@ if __name__ == '__main__':
     print('> '+os.path.basename(__file__))
     
     dirPath = './data/+unsorted/2607171519'
-    # fromDIRtoDFs(dirPath, verbose=True, keys=['images'])
+    # load(dirPath, verbose=True, keys=['images'])
     
     loc = '../opus_lmfi/data/260909_comp1/'
     pattern = '*_bprofiles.npy'

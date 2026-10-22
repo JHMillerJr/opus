@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(__file__))
 
 #> modules
 from modules.units import u; u=u()
-import plot
+import oldplot as plot
 import modules.geometry as geometry
 import modules.error as error
 import modules.parse as parse
@@ -129,7 +129,7 @@ def singleGal(sysConfig, **kwargs):
     
     #> ploting lenses
     if plotDict:
-        import plot
+        import oldplot as plot
         plot.kappa(*lens[:-1], pix_arc)
         plot.caustics(*lens[:-1], pix_arc, images=images)
         plot.caustics(*lens[:-1], pix_arc, images=images, zoom=3, xs=sources[0][0], ys=sources[0][1])

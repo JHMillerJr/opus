@@ -6,6 +6,7 @@
 ================================== """
 
 #> standard imports
+import os
 import numpy as np
 from matplotlib.path import Path
 
@@ -17,7 +18,7 @@ from modules.units import u; u=u()
 """ #> SOURCES =======================
 ================================== """
 
-#> uniform random sources inside a polygon (vectorized rejection sampling)
+#> uniform random sources inside a polygon
 def sample_sources(poly_pts, nsrc, rng=None, oversample=3):
 
     #> declarations
@@ -374,3 +375,133 @@ def caustic_points(xg, yg, bprof, lamt):
     return np.column_stack((tx - ax, ty - ay)) # arcsec
 
 
+""" #> CAUSTIC AREAS =================
+================================== """
+
+#> critical curves (lam = 0) + caustics of one galaxy on a grid, tangential (t) & radial (r) [arcsec]
+#> uses the longest curve of each; edge = a curve touches the grid edge (within pad pixels) or is not closed
+def crit_caustics(xg, yg, bprof, jac=None, pad=2.0):
+    
+    #> imports
+    from skimage import measure
+    
+    #> getting jacobian if not supplied
+    if jac is None: jac = profiles.alpha_jac_points(xg, yg, bprof)
+    _, _, axx, axy, ayx, ayy = jac
+    
+    #> declarations
+    x0, y0  = xg[0,0], yg[0,0]                          # arcsec
+    arc_pix = xg[0,1] - xg[0,0]                         # arcsec per pixel
+    Ny, Nx  = xg.shape
+    
+    #> eigenvalues
+    kappa = 0.5*(axx + ayy)
+    gamma = np.hypot(0.5*(axx - ayy), 0.5*(axy + ayx))
+    lams  = {'t': 1 - kappa - gamma,                    # tangential
+             'r': 1 - kappa + gamma}                    # radial
+    
+    #> curves + caustics
+    out = {'edge': False}
+    for key, lam in lams.items():
+        
+        #> lam = 0 contours, (row, col) indices [pix]
+        cs = measure.find_contours(lam, 0.0)
+        out[f'n_{key}curve'] = len(cs)
+        
+        #> curve touching the grid edge or not closed
+        for c in cs:
+            if (np.any(c[:,1] <= pad) or np.any(c[:,1] >= Nx-1-pad) or
+                np.any(c[:,0] <= pad) or np.any(c[:,0] >= Ny-1-pad) or not np.allclose(c[0], c[-1])):
+                out['edge'] = True
+        
+        #> no curve
+        if len(cs) == 0:
+            out[f'{key}crit'], out[f'{key}caus'] = None, None
+            continue
+        
+        #> longest curve: pix --> arcsec (col = x, row = y)
+        c  = max(cs, key=len)
+        th = np.column_stack((x0 + c[:,1]*arc_pix,                       # arcsec
+                              y0 + c[:,0]*arc_pix))                      # arcsec
+        
+        #> back-projecting, beta = theta - alpha
+        ax, ay = profiles.alpha_points(th[:,0], th[:,1], bprof)          # arcsec
+        out[f'{key}crit'] = th                                           # arcsec
+        out[f'{key}caus'] = np.column_stack((th[:,0] - ax, th[:,1] - ay)) # arcsec
+    
+    return out
+
+
+#> area of a polygon (shoelace) [arcsec^2]
+def poly_area(p):
+    return 0.5*abs(np.dot(p[:,0], np.roll(p[:,1], -1)) - np.dot(p[:,1], np.roll(p[:,0], -1)))
+
+
+#> overlap area of two polygons [arcsec^2] (shapely; fine-grid estimate if shapely is not installed)
+def overlap_area(a, b, n=1000):
+    
+    #> exact (shapely)
+    try:
+        from shapely.geometry import Polygon
+        return Polygon(a).buffer(0).intersection(Polygon(b).buffer(0)).area
+    
+    #> estimate: fraction of a fine grid (over a's bounding box) inside both
+    except ImportError:
+        (xmin, ymin), (xmax, ymax) = a.min(axis=0), a.max(axis=0)
+        gx, gy = np.meshgrid(np.linspace(xmin, xmax, n), np.linspace(ymin, ymax, n))
+        pts    = np.column_stack((gx.ravel(), gy.ravel()))
+        inside = Path(a).contains_points(pts) & Path(b).contains_points(pts)
+        return inside.mean() * (xmax - xmin) * (ymax - ymin)
+
+
+#> tangential caustic area [arcsec^2]
+def t_area(caus):
+    return poly_area(caus['tcaus']) if caus['tcaus'] is not None else np.nan
+
+
+#> radial caustic area [arcsec^2]
+def r_area(caus):
+    return poly_area(caus['rcaus']) if caus['rcaus'] is not None else np.nan
+
+
+#> naked-cusp area: tangential caustic outside the radial caustic [arcsec^2] (3-image region)
+#> no radial curve found --> 0 (tangential caustic assumed inside the radial caustic)
+def nc_area(caus):
+    if caus['tcaus'] is None: return np.nan
+    if caus['rcaus'] is None: return 0.0
+    return max(t_area(caus) - overlap_area(caus['tcaus'], caus['rcaus']), 0.0)
+
+
+#> quad area: tangential caustic inside the radial caustic [arcsec^2] (5-image region)
+def q_area(caus):
+    return t_area(caus) - nc_area(caus)
+
+
+#> all caustic areas of one galaxy on a grid [arcsec^2] (+ number of curves, edge flag)
+def caustic_areas(xg, yg, bprof, **kwargs):
+    
+    #> curves + caustics
+    caus = crit_caustics(xg, yg, bprof, **kwargs)
+    
+    return {'t_area':   t_area(caus),          # tangential caustic
+            'r_area':   r_area(caus),          # radial caustic
+            'nc_area':  nc_area(caus),         # naked cusps (3 images)
+            'q_area':   q_area(caus),          # quads (5 images)
+            'n_tcurve': caus['n_tcurve'],      # number of tangential curves
+            'n_rcurve': caus['n_rcurve'],      # number of radial curves
+            'edge':     caus['edge']}          # a curve touches the grid edge
+
+
+""" #> MAIN ==========================
+================================== """
+
+#> main function
+if __name__ == '__main__':
+    
+    #> name
+    print('> '+os.path.basename(__file__),'\n')
+    
+    
+
+    # end
+# thank

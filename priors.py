@@ -74,6 +74,9 @@ def sample_priors(numGals, **kwargs):
             df[need['hern']] = df_in[need['hern']].to_numpy(dtype=float)
             df['mstar_nsig'], df['re_nsig'] = lookup_nsig(df) # sigma offsets (look-up coordinates)
         
+        #> axis ratio (look-up corrections)
+        if df_in is not None and 'axisrat' in df_in: df['axisrat'] = df_in['axisrat'].to_numpy(dtype=float)
+        
         return df
     
     #> initial sample
@@ -81,7 +84,7 @@ def sample_priors(numGals, **kwargs):
     df = autoscale(df, **kwargs)
     
     #> rejected galaxies w/ fixed masses can only be selected by redrawing their redshifts
-    fixed_mass = (not priorDict['nfw']) and (not priorDict['hern']) and (redraw is None)
+    fixed_mass = (not priorDict['nfw']) and (not priorDict['hern']) and (redraw is None or not kwargs.get('redraw_mass', True))
     nz = 0 # number of redshift redraws
     
     #> redraw rejected galaxies
@@ -226,7 +229,7 @@ def autoscale(df, **kwargs):
         df = df.copy()
         df['mstar_nsig'], df['re_nsig'] = lookup_nsig(df)
     
-    return lookup.firstLook_selFunc_v3(df, **kwargs)
+    return lookup.firstLook_selFunc_newt(df, **kwargs)
 
 
 #> sigma offsets of M_star & R_eff from the shmr & 18mowla msr (the v3 look-up coordinates)
@@ -815,120 +818,6 @@ def shmr_nsig(M_stars, M_virs, zls):
     logM_star, sigma_logM = p[:,0], p[:,1] # log10(solMass/h_shuntov^2), dex
     
     return (np.log10(np.asarray(M_stars) * h_shuntov**2) - logM_star) / sigma_logM
-
-
-#> returns look up bins for the shmr
-def shmr_bins():
-    
-    #> dictionary
-    shmrBins = {'zl':       {'min': 0, 'max':  2.0, 'bins': 5},
-                'logmvir':  {'min': 11.5, 'max': 14.5, 'bins': 1000}}
-    
-    #> setting up bins
-    
-    #> zl
-    #> edges of the bins
-    grid_edges = np.array([0., 0.5, 0.8, 1.1, 1.5, 2.0])
-    shmrBins['zl']['grid'] = grid_edges
-    
-    #> logmvir
-    #> edges of the bins
-    grid_edges  = np.linspace(shmrBins['logmvir']['min'], 
-                              shmrBins['logmvir']['max'], 
-                              shmrBins['logmvir']['bins'] + 1)
-    
-    #> centers of the bins
-    grid_bins   = (grid_edges[:-1] + grid_edges[1:]) / 2
-    
-    #> saving depending on what grid
-    shmrBins['logmvir']['grid'] = np.array([round(x,6) for x in grid_bins])
-    
-    return shmrBins
-
-#> getting bin indices for the smhr table
-def shmr_fromFile(df, **kwargs):
-    
-    #> declarations
-    h_shuntov = 0.7
-    
-    #> getting bins
-    shmrBins = shmr_bins()
-       
-    #> getting zl indices
-    df['izl_shmr'] = np.digitize(df['zl'], bins=shmrBins['zl']['grid'], right=False) - 1
-    
-    #> getting logmvir indices
-    df['ilogmvir_shmr'] = lookup.bin_indices(x=df['log10_M_vir'], grid=shmrBins['logmvir']['grid'])
-    
-    df = load_shmr(df['izl_shmr'], df['ilogmvir_shmr'])
-    
-    #> sampling
-    sample_logM_star = norm.rvs(loc=df['logM_star'], scale=df['sigma_logM'])
-    M_star = 10**sample_logM_star / h_shuntov**2 # solMass
-    
-    return M_star
-
-#> returns stellar masses based on M_virs, zls, and 
-def load_shmr(izl, ilogmvir, **kwargs):
-    
-    #> kwargs
-    file = kwargs.get('file', './priors/look_up_tables/shmr_table.parquet')
-    
-    #> load file
-    df = pd.read_parquet(file)
-    
-    #> loading bin sizes
-    smhrBins = shmr_bins()
-
-    #> find model
-    i = np.ravel_multi_index((izl,        # zl bin
-                              ilogmvir),  # M_vir bin
-                             (smhrBins['zl']['bins'],
-                              smhrBins['logmvir']['bins']))
-
-    return df.iloc[i]
-
-#> generates an array of smhr 'solutions' to act as a look up table
-def generate_shmr_table():
-    
-    #> declarations
-    smhrBins = shmr_bins()
-    
-    #> getting bins
-    zl_grid = smhrBins['zl']['grid']
-    zl_centers = (zl_grid[:-1] + zl_grid[1:]) / 2
-    M_virs = np.array([10**x for x in smhrBins['logmvir']['grid']])
-    
-    #> declarations
-    logM_vir = np.log10(M_virs)
-    ilogmvir = np.array(range(len(M_virs)))
-    
-    #> calculating the stellar mass from M_vir and zl
-    data = []
-    for izl, zl in enumerate(zl_centers):
-        
-        #> getting stellar mass
-        zls = np.tile(zl, len(M_virs))
-        logNorm_params = stellar_h_mass_rel(M_virs=M_virs, zls=zls, return_sample=False)
-        logM_star, sigma_logM = logNorm_params[:,0], logNorm_params[:,1]
-        
-        #> getting indices
-        izl = np.tile(int(izl), len(M_virs))
-        
-        #> saving
-        array = np.vstack([izl, ilogmvir, zls, logM_vir, logM_star, sigma_logM]).T
-        data.append(array)
-    
-    #> converting to pandas
-    data = np.vstack(data)
-    df = pd.DataFrame(data, columns=['izl', 'ilogmvir', 'zl', 'logmvir', 'logM_star', 'sigma_logM'])
-    
-    #> writing to file
-    loc = './priors/look_up_tables/'
-    outFile = loc+f'shmr_table.parquet'
-    df.to_parquet(outFile)
-    
-    return
 
 
 """ #> STELLAR-M-S REL ===============

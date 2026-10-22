@@ -173,7 +173,7 @@ def getSelDict(res=True, slcs=True, **kwargs):
     
     #> selection effects
     selDict = {'res' : {'on': res,  'ER_resolution': ER_resolution}, # resolution: ER >= ER_resolution & finite
-               'slcs': {'on': slcs}}                                 # quad cross section: random < d_area/d_area_max
+               'slcs': {'on': slcs}}                                 # quad cross section: random < q_area/q_area_max
     
     #> setting all
     if all_ is not None:
@@ -291,6 +291,10 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
         import pandas as pd
         import modules.error as error
         
+        #> axis ratio: varied index + lower edge of its prior (p_quad normalization)
+        jq = [k for k, p in enumerate(varied_params) if p[0] == 'nfw' and p[1] == 0 and p[2] == 'axisrat']
+        q_min = lb[jq[0]] if jq else (float(ranges['nfw'][0]['axisrat']) if len(ranges['nfw']) else None)
+        
         #> galaxy values of the prior inputs whose priors are off (sampled or fixed paramRanges)
         def prior_inputs(inds):
             cols = {}
@@ -300,6 +304,9 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
                 if len(ranges[prof]) == 0: error.phrase(f'{prof} priors are off, but there is no {prof} profile to take {param} from')
                 j = [k for k, p in enumerate(varied_params) if p[0] == prof and p[1] == 0 and p[2] == param]
                 cols[col] = samples[j[0]][inds] if j else np.full(len(inds), float(ranges[prof][0][param]))
+            
+            #> axis ratio (nfw; hern shares it) for the look-up corrections
+            if len(ranges['nfw']): cols['axisrat'] = samples[jq[0]][inds] if jq else np.full(len(inds), float(ranges['nfw'][0]['axisrat']))
             return pd.DataFrame(cols)
         
         #> redraws the varied params of rejected galaxies (only if a prior input is varied)
@@ -315,7 +322,9 @@ def bprofiles(numGals, ranges=paramRanges(), **kwargs):
                                                         'redshifts': redshifts,                                 # (numGals, 2) or None
                                                         'mdef':      mdef,                                      # halo mass definition
                                                         'df_in':     prior_inputs(np.arange(numGals)),          # values for priors that are off
-                                                        'redraw':    redraw if len(varied_inputs) else None}))  # redraws rejected galaxies
+                                                        'q_min':     q_min,                                     # axis-ratio prior lower edge
+                                                        'redraw_mass': bool(len(varied_inputs)),                # redraw changes masses
+                                                        'redraw':    redraw if (len(varied_inputs) or jq) else None}))  # redraws rejected galaxies
 
         #> overwriting redshifts & pix_arc
         redshifts = df[['zl', 'zs']].to_numpy()
@@ -401,8 +410,7 @@ if __name__ == '__main__':
     
     #> import for test
     import plot
-    import lensing
-    import deflection
+    import generate
     
     import modules.parse as parse
     profiles = paramRanges()
@@ -410,25 +418,16 @@ if __name__ == '__main__':
     
     #> grid declarations
     nph = 50
-    w_range = np.arange(-nph, nph, 1, dtype=float)
-    xgrid, ygrid = np.meshgrid(w_range, w_range)
-    pix_arc = 60
     
     numgals = 1
     
     profiles = bprofiles(numgals)
     
-    #> calculating deflections
+    #> finding images (newton method)
     srt = time.time()
-    delx, dely = deflection.deflectionGPU(xgrid, ygrid, profiles)
-    # cp.cuda.Stream.null.synchronize()
-    
-    lensing.lfims(xgrid/pix_arc, ygrid/pix_arc, 
-                  delx[0], dely[0],
-                  xs=0, ys=0, pix_arc=60, nph=60)
+    out = generate.genQuadNewt(profiles[0], 1, nph=nph)
 
-    kappa = lensing.angles_to_kappa(delx[0], dely[0], pix_arc=60)
-    plot.kappa(xgrid, ygrid, kappa, pix_arc)
+    plot.kappa(profiles[0], nph=nph, images=out['images'])
     
     print(time.time()-srt)
     print((time.time()-srt)/numgals)

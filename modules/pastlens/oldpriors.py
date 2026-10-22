@@ -995,7 +995,7 @@ if __name__ == '__main__':
     
     #> imports
     import sys
-    import plot
+    import oldplot as plot
     import oldparams as params
     
     M_virs = np.array([1e12, 1e13])

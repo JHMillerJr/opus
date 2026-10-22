@@ -339,7 +339,7 @@ if __name__ == '__main__':
     print('> '+os.path.basename(__file__))
     
     #> import for test
-    import plot
+    import oldplot as plot
     import lensing
     import deflection
     

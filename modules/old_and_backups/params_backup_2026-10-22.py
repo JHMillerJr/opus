@@ -1,0 +1,428 @@
+#> params.py
+# the precursor to deflections.py
+    
+""" #> IMPORTS =======================
+================================== """
+
+#> reg imports
+import os
+import time
+import numpy as np
+from copy import deepcopy
+
+#> modules
+import cosmology
+import modules.parse as parse
+from modules.units import u; u = u()
+
+#> truncated multivariate normal sampler
+# from https://github.com/brunzema/truncated-mvn-sampler/blob/main/minimax_tilting_sampler.py
+from modules.truncated_mvn_sampler.minimax_tilting_sampler import TruncatedMVN    
+
+
+""" #> PARAM RANGES ==================
+================================== """
+
+#> returns the profile input parameters
+def paramRanges():
+    
+    #> profiles
+    ranges = {'zl': 0.5,     # lens redshift
+              'zs': 1.0,     # source redshift
+              'pix_arc': 60, # pix/arc conversion
+              'nfw': [ # nfw
+                     {'name': 'p01',
+                      'x0':            {'init':  0.0, 'min':-0.1, 'max':0.1, 'fit': False},   # x center of profile 
+                      'y0':            {'init':  0.0, 'min':-0.1, 'max':0.1, 'fit': False},   # y center of profile
+                      'logmass':       {'init':   13, 'min':  10, 'max': 14, 'fit': False},   # log_10(M) [solMass]
+                      'concentration': {'init':    7, 'min':   2, 'max': 10, 'fit': False},   # concentration []
+                      'axisrat':       {'init': 0.85, 'min': 0.5, 'max':0.95,'fit': False},   # axis ratio []
+                      'theta':         {'init':  0.0, 'min': 0.0, 'max':90.0,'fit': False},   # position angle [deg]
+                      'add': True}],
+              'hern': [ # hern
+                      {'name': 'p02',
+                       'x0':      {'init': 0.0, 'min':-0.1, 'max':0.1, 'fit': False},   # x center of profile 
+                       'y0':      {'init': 0.0, 'min':-0.1, 'max':0.1, 'fit': False},   # y center of profile
+                       'logmass': {'init': 11.1, 'min':   8, 'max': 12, 'fit': False},   # log_10(M) [solMass]
+                       'effrad':  {'init':    5, 'min': 0.5, 'max': 10, 'fit': False},   # R_E; effective radius [kpc]
+                       'axisrat': {'init':'p01', 'min': 0.5, 'max':0.95,'fit': False},   # axis ratio []
+                       'theta':   {'init':  0.0, 'min':-180, 'max':180, 'fit': False},   # position angle [deg]
+                       'add': True}],
+              'mult': [ # multipoles
+                      {'m': 1,  # m num
+                       'x0':    {'init':0.0, 'min':-0.1, 'max': 0.1, 'fit': False},   # x center of profile 
+                       'y0':    {'init':0.0, 'min':-0.1, 'max': 0.1, 'fit': False},   # y center of profile
+                       'norm':  {'init':5e-3, 'min': 0.0, 'max':0.05, 'fit': False},    # normalization []
+                       'slope': {'init': 2.0, 'min': 2.0, 'max': 2.0, 'fit': False},   # slope []
+                       'theta': {'init':0.0, 'min': 0.0, 'max': 90,  'fit': False},    # position angle [deg]
+                       'add': True},
+                      {'m': 3,  # m num
+                       'x0':    {'init':'p02', 'min':-0.1, 'max': 0.1, 'fit': False},   # x center of profile 
+                       'y0':    {'init':'p02', 'min':-0.1, 'max': 0.1, 'fit': False},   # y center of profile
+                       'norm':  {'init': 5e-3, 'min': 0.0, 'max':0.05, 'fit': False},    # normalization []
+                       'slope': {'init':  2.0, 'min': 2.0, 'max': 2.0, 'fit': False},   # slope []
+                       'theta': {'init':  0.0, 'min': -180,'max': 180, 'fit': False},   # position angle [deg]
+                       'add': True},
+                      {'m': 4,  # m num
+                       'x0':    {'init':'p02', 'min':-0.1, 'max': 0.1, 'fit': False},   # x center of profile 
+                       'y0':    {'init':'p02', 'min':-0.1, 'max': 0.1, 'fit': False},   # y center of profile
+                       'norm':  {'init': 5e-3, 'min': 0.0, 'max':0.05, 'fit': False},    # normalization []
+                       'slope': {'init':  2.0, 'min': 2.0, 'max': 2.0, 'fit': False},   # slope []
+                       'theta': {'init':  0.0, 'min': -180,'max': 180, 'fit': False},   # position angle [deg]
+                       'add': True}],
+              'ex': [# ex shear
+                    {'norm':  {'init': 1e-2, 'min': 0.0, 'max':0.03, 'fit': False},      # normalization []
+                     'theta': {'init': 0.0,  'min':-180, 'max': 180, 'fit': False},      # position angle [deg]
+                     'add': True}],
+    }
+    
+    return ranges
+
+#> prunes the non-varied params
+def pruneParams(ranges=paramRanges()):
+    
+    #> creating copy (needed)
+    ranges = deepcopy(ranges)
+    
+    #> iterating through ranges to create galaxy dict
+    #> if not varied --> collapse
+    #> if varied --> store path
+    #> if dependant on another value --> store path
+    varied_params, depend_params, names = [], [], {}
+    for i, profile in enumerate(ranges.keys()):     # each profile (nfw, etc.)
+        if profile in ['zl', 'zs', 'pix_arc']: continue # skipping redshifts & conversion
+        ranges[profile] = [d for d in ranges[profile] if d['add']] # removing false adds
+        for j, dic in enumerate(ranges[profile]):   # each dic in profile array (i.e., [m1, m3, ...]) 
+            for k, param in enumerate(dic):         # each param in dic
+                if param in ['add', 'm', 'name']:   # params are not fit (skips)
+                    if param in ['name']: names[dic[param]] =  dic # saves name for dependant params
+                    continue  # skips
+                if not dic[param]['fit']:           # if not fitting
+                    dic[param] = dic[param]['init'] # sets to init
+                    if 'p' in str(dic[param]): depend_params.append([param, dic, deepcopy(dic[param])]) # if param depends on another
+                else: varied_params.append([profile, j, param, dic[param]]) # if param is varied
+                
+    #> need to resolve varied params first then dependant params
+    #> converting to numpy for later
+    varied_params = np.array(varied_params)
+    depend_params = np.array(depend_params)
+    
+    return ranges, varied_params, depend_params, names
+
+
+#> toggles paramRanges (and prunes) based on paramDict values
+def toggleParams(paramDict, ranges=None):
+    
+    #> gets default ranges if none provided
+    if ranges is None: ranges = paramRanges()
+    
+    #> iterating through paramRanges
+    for i, profile in enumerate(ranges.keys()):         # each profile (nfw, etc.)
+        if profile in ['zl', 'zs', 'pix_arc']: continue # skipping redshifts & conversion
+        if profile != 'mult': # if not mult
+            ranges[profile][0]['add'] = paramDict[profile] # changing add bool
+        else:
+            mult_dic = deepcopy(ranges[profile][0])     # creating mult dic template
+            ranges[profile] = []                        # clearing pre-set
+            for j, m in enumerate(paramDict[profile]):  # each dic in profile array (i.e., [m1, m3, ...]) 
+                ranges[profile].append(deepcopy(mult_dic))
+                ranges[profile][j]['m'] = m
+    
+    return ranges
+    
+
+""" #> BPROFILES =====================
+================================== """
+
+#> returns prior dictionary (if drawing from priors)
+def getPriorDict(nfw=False, hern=False, red=False, **kwargs):
+    
+    #> modules
+    import modules.error as error
+    
+    #> kwargs
+    all_ = kwargs.get('all', None)
+    
+    #> older individual keys (hmf & cmr --> nfw, shmr & msr --> hern; must be turned on/off together)
+    for group, keys in {'nfw': ['hmf', 'cmr'], 'hern': ['shmr', 'msr']}.items():
+        old = [kwargs[k] for k in keys if k in kwargs]
+        if len(old) == 0: continue
+        if len(old) == 1 or old[0] != old[1]: error.phrase(f'{keys[0]} and {keys[1]} must be turned on/off together (use {group}=)')
+        if group == 'nfw': nfw = nfw or old[0]
+        if group == 'hern': hern = hern or old[0]
+    
+    #> default if drawing from priors
+    priorDict = {'nfw' : nfw,  # halo mass function (hmf) + mass-concentration relation (cmr)
+                 'hern': hern, # stellar-to-halo mass relation (shmr) + mass-size relation (msr)
+                 'red' : red}  # redshift distribution
+    
+    #> setting all
+    if all_ is not None:
+        for key in priorDict:
+            priorDict[key] = all_
+    
+    return priorDict
+
+
+#> returns selection dictionary (which selection effects reject galaxies when drawing from priors)
+def getSelDict(res=True, slcs=True, **kwargs):
+    
+    #> kwargs
+    all_          = kwargs.get('all', None)            # sets every selection effect
+    ER_resolution = kwargs.get('ER_resolution', 0.15)  # min einstein radius [arcsec]
+    
+    #> selection effects
+    selDict = {'res' : {'on': res,  'ER_resolution': ER_resolution}, # resolution: ER >= ER_resolution & finite
+               'slcs': {'on': slcs}}                                 # quad cross section: random < d_area/d_area_max
+    
+    #> setting all
+    if all_ is not None:
+        for key in selDict:
+            selDict[key]['on'] = all_
+    
+    return selDict
+
+
+#> returns batch profiles for deflections based on parameter ranges
+def bprofiles(numGals, ranges=paramRanges(), **kwargs):
+    
+    #> kwargs
+    verbose = kwargs.get('verbose', False)
+    seed = kwargs.get('seed', None)
+    
+    #> changing varied params based on priors
+    priorLocs = {'hmf' : {'prof':  'nfw', 'param':       'logmass', 'sample':  'log10_M_vir', 'group':  'nfw'},
+                 'cmr' : {'prof':  'nfw', 'param': 'concentration', 'sample':        'c_vir', 'group':  'nfw'},
+                 'shmr': {'prof': 'hern', 'param':       'logmass', 'sample': 'log10_M_star', 'group': 'hern'},
+                 'msr' : {'prof': 'hern', 'param':        'effrad', 'sample':        'R_eff', 'group': 'hern'},}
+    
+    #> iterating thru priors
+    priorDict = kwargs.get('priorDict', getPriorDict())
+    if any(priorDict.values()):      # if there is at least one prior
+        for key in priorLocs.keys(): # iterating thru each prior
+            if not priorDict[priorLocs[key]['group']]: continue # if not used, continue
+            for prof in ranges[priorLocs[key]['prof']]:
+                prof[priorLocs[key]['param']]['fit'] = False
+                prof[priorLocs[key]['param']]['init'] = 0.0
+    
+    #> pruning non-varied params
+    ranges, varied_params, depend_params, names = pruneParams(ranges)
+        
+    #> pix_arc, etc.
+    pix_arc = kwargs.get('pix_arc', np.array([float(ranges['pix_arc'])] * numGals))
+    uniform = kwargs.get('uniform', False)
+    cosmo = kwargs.get('cosmo', u.cosmo)
+    
+    #> halo mass definition (nfw density contrast, hmf, cmr, & look-up tables): 'vir' or '200c'
+    mdef = kwargs.get('mdef', 'vir' if priorDict['nfw'] else '200c')
+    if mdef not in ['vir', '200c']:
+        import modules.error as error
+        error.phrase(f"mdef={mdef} not understood. Please use 'vir' or '200c'")
+    
+    #> checking
+    redshifts = kwargs.get('redshifts', None)
+    if (redshifts is None) and (not priorDict['red']):
+        redshifts = np.tile([ranges['zl'], ranges['zs']], (numGals,1)) # same (zl, zs) for every galaxy
+    
+    #> number of varied parameters
+    d = len(varied_params) # num dims
+    
+    #> print the varied paramsW
+    if verbose:
+        print('> The varied params are:')
+        for var in varied_params:
+            print(f'>   {var[0]}, {var[1]}, {var[2]}')
+        print()
+    
+    #> IM NOT SURE IF I NEED THIS OR IF EVERYTHING AFTER THIS WILL BE OKAY WITH D=0 (i think it's okay)
+    if d: # if there are varied parameters (otherwise can skip)
+    
+        #> unpacking kwargs
+        mu  = kwargs.get('mu', None)
+        cov = kwargs.get('cov', None)
+        ub  = kwargs.get('ub', None)
+        lb  = kwargs.get('lb', None)
+        
+        #> creating mean vector and u&l bounds
+        if mu is None: mu = np.array([ x['init'] for x in varied_params[:,3] ]) # means (init)
+        else: mu = np.array(mu)
+        if ub is None: ub = np.array([ x['max']  for x in varied_params[:,3] ]) # upper bound (max)
+        else: ub = np.array(ub)
+        if lb is None: lb = np.array([ x['min']  for x in varied_params[:,3] ]) # lower bound (min)
+        else: lb = np.array(lb)
+        
+        #> getting parameter range
+        rng = np.subtract(ub, lb) # param range
+        std_range_perc = kwargs.get('std_range_perc', 10) # sets std based on % of parameter range
+        
+        #> if using truncated gaussian (the default)
+        if not uniform:
+        
+            #> covariance matrix (identity for now)
+            if cov is None:
+                cov = np.identity(d)
+                cov = cov * (rng * std_range_perc / 100)**2 # squares to std --> var
+            else: cov = np.array(cov).reshape(d,d)
+            
+            if verbose: # if want to print cov and std
+                # print('> The params being varied are:\n', varied_params[:,0:2])
+                print('> The mean vector is:\n', mu)
+                print('> The covariance matrix is:\n', cov)
+                print('> The standard deviation vector is:\n', np.diag(cov)**0.5)
+                print()
+            
+            #> sampling from the truncated multivariate normal distribution
+            tmvn = TruncatedMVN(mu, cov, lb, ub, seed=seed)
+            samples = tmvn.sample(numGals)
+            samples = np.array(samples) #, dtype=np.float32) #> converts to cupy float32 
+            
+        #> if wanting a uniform distribution
+        elif uniform:
+            
+            #> sampling from uniform dist
+            samples = np.random.uniform(low=lb, high=ub, size=(numGals, d)).T
+            
+            
+    #> drawing from priors
+    if any(priorDict.values()):
+        
+        #> drawing from priors
+        import priors # importing priors
+        import pandas as pd
+        import modules.error as error
+        
+        #> galaxy values of the prior inputs whose priors are off (sampled or fixed paramRanges)
+        def prior_inputs(inds):
+            cols = {}
+            for key in priorLocs:
+                if priorDict[priorLocs[key]['group']]: continue
+                prof, param, col = priorLocs[key]['prof'], priorLocs[key]['param'], priorLocs[key]['sample']
+                if len(ranges[prof]) == 0: error.phrase(f'{prof} priors are off, but there is no {prof} profile to take {param} from')
+                j = [k for k, p in enumerate(varied_params) if p[0] == prof and p[1] == 0 and p[2] == param]
+                cols[col] = samples[j[0]][inds] if j else np.full(len(inds), float(ranges[prof][0][param]))
+            return pd.DataFrame(cols)
+        
+        #> redraws the varied params of rejected galaxies (only if a prior input is varied)
+        def redraw(inds):
+            if not uniform: samples[:, inds] = np.array(tmvn.sample(len(inds)))
+            else: samples[:, inds] = np.random.uniform(low=lb, high=ub, size=(len(inds), d)).T
+            return prior_inputs(inds)
+        varied_inputs = [p for p in varied_params if any((not priorDict[v['group']]) and p[0] == v['prof'] and p[1] == 0 and p[2] == v['param']
+                                                         for v in priorLocs.values())]
+        
+        #> sampling (kwargs passed thru; updated w/ the values set here)
+        df = priors.sample_priors(numGals, **(kwargs | {'priorDict': priorDict,                                 # what to draw
+                                                        'redshifts': redshifts,                                 # (numGals, 2) or None
+                                                        'mdef':      mdef,                                      # halo mass definition
+                                                        'df_in':     prior_inputs(np.arange(numGals)),          # values for priors that are off
+                                                        'redraw':    redraw if len(varied_inputs) else None}))  # redraws rejected galaxies
+
+        #> overwriting redshifts & pix_arc
+        redshifts = df[['zl', 'zs']].to_numpy()
+        pix_arc = df['pix_arc']
+            
+    #> creating batch profiles!
+    batch_profiles = [] # each element is a galaxy
+    for i in range(numGals):
+        
+        #> setting redshifts & pix_arc
+        ranges['zl'] = redshifts[i][0]
+        ranges['zs'] = redshifts[i][1]
+        ranges['pix_arc'] = pix_arc[i]
+        
+        #> setting varied params
+        for j, p in enumerate(varied_params):
+            prof, ind, param, _ = p
+            ranges[prof][ind][param] = samples[j][i]
+            
+        #> iterating thru priors
+        if any(priorDict.values()):      # if there is at least one prior
+            for key in priorLocs.keys(): # iterating thru each prior
+                if not priorDict[priorLocs[key]['group']]: continue # if not used, continue
+                for prof in ranges[priorLocs[key]['prof']]:
+                    prof[priorLocs[key]['param']] = df.loc[i][priorLocs[key]['sample']]
+        
+        # print(ranges, df.loc[i])
+        #> unit conversions
+            
+        #> setting depend params
+        for j, p in enumerate(depend_params):
+            param, dic, name = p
+            dic[param] = names[name][param] # names[dependant_name][dependant_param]
+            
+        #> calculating cosmological params (can save in batch_profiles)
+        ranges['rhoc']    = cosmology.critDensity(ranges['zl'], cosmo=cosmo)              # solMass/kpc^3
+        ranges['sigCrit'] = cosmology.sigmaCrit(ranges['zl'], ranges['zs'], cosmo=cosmo)  # solMass/kpc^2
+        ranges['angDist'] = cosmology.angDist(0, ranges['zl'], cosmo=cosmo) * 1e3         # kpc
+        
+        #> adding calculated params
+        #> nfw: logmass, rhoc(z), c --> radius; rhoc(z), c --> rho0
+        for prof in ranges.get('nfw', []):
+            
+            #> density contrast from the halo mass definition
+            if mdef == 'vir':
+                import priors
+                delta = priors.densityContrast(ranges['zl'], cosmo=cosmo)
+            else:
+                delta = 200.
+            
+            c = prof['concentration']
+            prof['radius'] = (1/c) * ((3. * 10**prof['logmass']) / (delta * 4 * 3.1415926536 * ranges['rhoc']))**(1./3.)
+            prof['rho0'] = 4 * (delta/3.) * (c**3.) / (np.log(1+c) - (c/(1+c))) * ranges['rhoc']
+        
+        #> hern: Re --> r0; logmass, r0 --> normalization
+        for prof in ranges.get('hern', []):
+            prof['radius'] = prof['effrad'] * 0.551 # r0 = re*0.551
+            prof['norm'] = (10**prof['logmass'])/(2.*np.pi*(prof['radius'])**3)  # radius = r0 (NOT RE!!)
+            
+        batch_profiles.append(deepcopy(ranges))
+    
+    return batch_profiles
+
+
+""" #> GRID ==========================
+================================== """
+
+#> returns grid
+def grid(nph):
+    w_range = np.arange(-nph, nph, 1, dtype=float)
+    xgrid, ygrid = np.meshgrid(w_range, w_range)
+    return xgrid, ygrid
+    
+
+""" #> MAIN ==========================
+================================== """
+
+#> main function
+if __name__ == '__main__':
+    
+    #> name
+    print('> '+os.path.basename(__file__))
+    
+    #> import for test
+    import plot
+    import generate
+    
+    import modules.parse as parse
+    profiles = paramRanges()
+    parse.toJSON('paramRanges-2', profiles)
+    
+    #> grid declarations
+    nph = 50
+    
+    numgals = 1
+    
+    profiles = bprofiles(numgals)
+    
+    #> finding images (newton method)
+    srt = time.time()
+    out = generate.genQuadNewt(profiles[0], 1, nph=nph)
+
+    plot.kappa(profiles[0], nph=nph, images=out['images'])
+    
+    print(time.time()-srt)
+    print((time.time()-srt)/numgals)
+    
+
+    # end
+# thank
