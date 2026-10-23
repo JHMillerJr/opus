@@ -601,6 +601,19 @@ def table_row(izs, zl, zs, model, r, seed):
             r['n_tcurve'] > 1, r['nims'], seed]
 
 
+#> solves one model; an error is recorded as a failed model (window_failed) instead of killing the cell
+def solve_safe(bprof, seed, model, zl, zs):
+
+    #> solving
+    try: return solve(bprof, seed)
+
+    #> failed model
+    except Exception as e:
+        print(f'>   warning: model failed at zl {zl:.2f}, zs {zs:.2f}, logM_vir {model[3]:.3f}, '
+              f'mstar_nsig {model[7]:.2f}, re_nsig {model[8]:.2f} ({type(e).__name__}: {e})', flush=True)
+        return unphysical | {'window_failed': True}
+
+
 #> measures every model of one (zl, zs) cell
 def generate_cell(job):
 
@@ -611,7 +624,7 @@ def generate_cell(job):
     #> each model (unphysical: zs <= zl)
     rows = []
     for model, bprof, seed in zip(models, bprofiles, seeds):
-        r = unphysical if bprof is None else solve(bprof, seed)
+        r = unphysical if bprof is None else solve_safe(bprof, seed, model, zl, zs)
         rows.append(table_row(izs, zl, zs, model, r, seed))
 
     return izl, izs, rows
@@ -797,6 +810,14 @@ def print_header(config, bins, zl_inds, todo, workers, validate):
 """ #> RUN ===========================
 ================================== """
 
+#> stops a pool now: cancels the queued jobs and terminates the workers (otherwise the pool waits for every job)
+def stop_pool(pool):
+    procs = list(pool._processes.values())                  # before shutdown (it clears _processes)
+    pool.shutdown(wait=False, cancel_futures=True)
+    for p in procs: p.terminate()
+    return
+
+
 #> multiprocessing over (zl, zs) cells; a zl table is written once all of its zs cells are done
 def run_cells(jobs, config, bins, workers, validate=False, max_er=2.4):
 
@@ -810,8 +831,11 @@ def run_cells(jobs, config, bins, workers, validate=False, max_er=2.4):
         futures = [pool.submit(generate_cell, job) for job in jobs]
         for fut in as_completed(futures):
 
-            #> collecting
-            izl, izs, rows = fut.result()
+            #> collecting (a failed cell stops the run at once)
+            try: izl, izs, rows = fut.result()
+            except BaseException:
+                stop_pool(pool)
+                raise
             done.setdefault(izl, {})[izs] = rows
             print(f">   zl {bins['zl'][izl]:.2f}, zs {bins['zs'][izs]:.2f}: {len(rows)} models, {(time.time() - srt)/60:.1f} min", flush=True)
             if len(done[izl]) < len(bins['zs']): continue

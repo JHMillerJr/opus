@@ -414,8 +414,8 @@ def crit_caustics(xg, yg, bprof, jac=None, pad=2.0):
                 np.any(c[:,0] <= pad) or np.any(c[:,0] >= Ny-1-pad) or not np.allclose(c[0], c[-1])):
                 out['edge'] = True
         
-        #> no curve
-        if len(cs) == 0:
+        #> no curve (or unresolved: fewer than 4 contour points)
+        if len(cs) == 0 or len(max(cs, key=len)) < 4:
             out[f'{key}crit'], out[f'{key}caus'] = None, None
             continue
         
@@ -439,6 +439,9 @@ def poly_area(p):
 
 #> overlap area of two polygons [arcsec^2] (shapely; fine-grid estimate if shapely is not installed)
 def overlap_area(a, b, n=1000):
+    
+    #> degenerate polygon (fewer than 4 points) --> no area
+    if len(a) < 4 or len(b) < 4: return 0.0
     
     #> exact (shapely)
     try:
