@@ -135,3 +135,22 @@ def morph_order(ims, mu=None):
     return out
 
 
+""" #> COMPARING =====================
+================================== """
+
+#> morphological vs fermat order of quads (images given in fermat order)
+#> comp: fermat arrival number (1-5) of each morphologically ordered image; match: 1 if the 4 outer images agree, else 0
+def morph_vs_fermat(fims):
+    
+    #> morphological order of the fermat-ordered images
+    mims = morph_order(fims)                                # (Q,5,2) arcsec
+    
+    #> fermat slot of each morph image (closest match)
+    diff = mims[:,:,None,:] - fims[:,None,:,:]              # (Q,5,5,2) arcsec
+    dist = np.hypot(diff[:,:,:,0], diff[:,:,:,1])           # (Q,5,5) arcsec
+    comp = np.argmin(dist, axis=2) + 1                      # (Q,5) arrival number (1-5)
+    
+    #> agreement of the 4 outer images
+    match = np.all(comp[:,:4] == np.arange(1, 5), axis=1).astype(float)
+    
+    return comp, match

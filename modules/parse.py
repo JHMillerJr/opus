@@ -149,15 +149,16 @@ def load(dirPath, verbose=False, **kwargs):
     #> ensuring that folder exists
     if not os.path.isdir(dirPath): error.phrase(f'{dirPath} does not exist')
         
-    #> seeing what npy + csv files exist in dir
-    files = sorted(glob.glob(dirPath + '*.npy') + glob.glob(dirPath + '*.csv'))
-    if len(files) == 0: error.phrase(f'Could not find any .npy or .csv files in {dirPath}')
+    #> seeing what npy + csv + json files exist in dir
+    files = sorted(glob.glob(dirPath + '*.npy') + glob.glob(dirPath + '*.csv') + glob.glob(dirPath + '*.json'))
+    if len(files) == 0: error.phrase(f'Could not find any .npy, .csv, or .json files in {dirPath}')
     
-    #> key = file ending after the last '_' (the fileName itself may contain '_' from its suffix)
+    #> key = file ending after the folder name (save() names files <folder>_<key>), otherwise after the last '_'
+    prefix = os.path.basename(dirPath[:-1]) + '_'
     organized_files = {}
     for file in files:
         stem = os.path.splitext(os.path.basename(file))[0]
-        key  = stem.rsplit('_', 1)[-1]
+        key  = stem[len(prefix):] if stem.startswith(prefix) else stem.rsplit('_', 1)[-1]
         if key in organized_files: error.highlight(f'More than one file ending in _{key} in {dirPath}, keeping {os.path.basename(file)}')
         organized_files[key] = file
     
@@ -167,10 +168,11 @@ def load(dirPath, verbose=False, **kwargs):
         if len(missing) > 0: error.phrase(f'Could not find files ending in {missing} in {dirPath}')
         organized_files = {key: organized_files[key] for key in requested_keys}
     
-    #> loading (csv --> dataframe, dict saved as npy --> dict)
+    #> loading
     dfs = {}
     for key, file in organized_files.items():
         if file.endswith('.csv'): dfs[key] = pd.read_csv(file); continue
+        if file.endswith('.json'): dfs[key] = fromJSON(file); continue
         data = np.load(file, allow_pickle=True)
         dfs[key] = data.item() if (data.dtype == object and data.ndim == 0) else data
 
@@ -179,6 +181,12 @@ def load(dirPath, verbose=False, **kwargs):
         for key in dfs: print(f'> {key:12s}: {getattr(dfs[key], "shape", type(dfs[key]).__name__)}')
         
     return dfs
+
+
+#> loads every data folder inside dirPath
+def load_folders(dirPath, verbose=False, **kwargs):
+    dirs = sorted(d for d in glob.glob(os.path.join(str(dirPath), '*')) if os.path.isdir(d))
+    return [load(d, verbose=verbose, **kwargs) for d in dirs]
 
 
 """ #> GEN OUTPUT ====================
@@ -211,8 +219,24 @@ def stack(out, **kwargs):
             'nims':   np.concatenate([g['nims'] for g in gals]),                     # (N,)
             'flag':   np.concatenate([g['flag'] for g in gals]),                     # (N,)
             'gal':    np.concatenate([np.full(len(g['nims']), i) for i, g in enumerate(gals)])} # (N,) index into bprofiles
-    if all('obs' in g for g in gals): data['obs'] = np.concatenate([g['obs'] for g in gals]) # (N, numObs)
     
+    #> optionals
+    optional = ['obs', 'scprox', 'order_comp', 'order_match', 'ER', 'ER_slope', 'caus_area', 'config']
+    for key in optional: 
+        if all(key in g for g in gals): 
+            data[key] = np.concatenate([g[key] for g in gals]) # (N, numObs)
+    
+    #> per-image optionals (padded to the common width)
+    for key in ['tau', 'kappa', 'gamma']:
+        if all(key in g for g in gals): 
+            data[key] = np.concatenate([newtlens.pad(g[key], w) for g in gals]) # (N, w)
+    
+    #> per-galaxy optionals (one object per galaxy, index with gal)
+    for key in ['tcaus', 'redraws']:
+        if all(key in g for g in gals):
+            data[key] = np.empty(len(gals), dtype=object)
+            for i, g in enumerate(gals): data[key][i] = g[key]
+            
     #> galaxy info (one per galaxy)
     data['bprofiles'] = np.array([g['bprof'] for g in gals], dtype=object)
     if paramRanges is not None: data['paramRanges'] = paramRanges

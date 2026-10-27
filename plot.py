@@ -52,8 +52,8 @@ def setStyle():
     plt.rcParams['axes.labelsize']    = fontsize
     plt.rcParams['axes.labelweight']  = 'bold'
     plt.rcParams['axes.labelpad']     = labelpad
-    plt.rcParams['legend.framealpha'] = 1
-    plt.rcParams['legend.edgecolor']  = '1'
+    # plt.rcParams['legend.framealpha'] = 1
+    # plt.rcParams['legend.edgecolor']  = '1'
     plt.rcParams['savefig.dpi']       = dpi
     plt.rcParams['savefig.bbox']      = 'tight'
     return
@@ -119,15 +119,20 @@ def toBox(ax, margin=0.1):
     return
 
 #> sets the tick spacing
-def ticks(ax, xnum=0.5, ynum=0.5, method='multiple'):
+def ticks(ax, xnum=0.5, ynum=0.5, method='multiple', **kwargs):
     
     #> imports
     import matplotlib.ticker as ticker
     
     #> multiple locator
-    if method == 'multipole':
-        ax.xaxis.set_major_locator(ticker.MultipleLocator(xnum))
-        ax.yaxis.set_major_locator(ticker.MultipleLocator(ynum))
+    if method == 'multiple':
+        ax.xaxis.set_major_locator(ticker.MultipleLocator(xnum, **kwargs))
+        ax.yaxis.set_major_locator(ticker.MultipleLocator(ynum, **kwargs))
+        
+    #> MaxNLocator
+    if method == 'max':
+        ax.xaxis.set_major_locator(ticker.MaxNLocator(xnum, **kwargs))
+        ax.yaxis.set_major_locator(ticker.MaxNLocator(ynum, **kwargs))
     
     return
 

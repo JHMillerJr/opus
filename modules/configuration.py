@@ -17,9 +17,6 @@ from matplotlib.colors import LinearSegmentedColormap, Normalize
 from shapely import geometry as geo
 from matplotlib.patches import Arc
 
-#> modules
-import lensing
-
 #> keys
 global keys
 keys = {'t12': r'$\mathbf{\theta_{12}}$', 't23': r'$\mathbf{\theta_{23}}$', 't34': r'$\mathbf{\theta_{34}}$',

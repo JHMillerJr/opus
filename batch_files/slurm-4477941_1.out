@@ -1,0 +1,10 @@
+> genlookup_newt.py 
+
+[31m[1m> mdef=200c: the shmr (2022 Shuntov) is calibrated on VIRIAL halo masses, but is given M_200 here --> these tables may be inaccurate [0m
+> mdef: 200c (cmr: c_200c)
+> grid: 30 x 30 x 60 x 13 x 13 (10140 models per cell)
+> zl tables to make: 30 (0 already exist)
+> workers: 128, nph: 50, target ER: 18.0 pix
+> tables: ./priors/newt_tables_c200/
+
+[2026-10-22T18:53:53.470] error: *** JOB 4477941 ON cn1039 CANCELLED AT 2026-10-22T18:53:53 DUE to SIGNAL Terminated ***

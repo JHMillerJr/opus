@@ -43,36 +43,36 @@ def paramRanges():
                       {'name': 'p02',
                        'x0':      {'init': 0.0, 'min':-0.1, 'max':0.1, 'fit': False},   # x center of profile 
                        'y0':      {'init': 0.0, 'min':-0.1, 'max':0.1, 'fit': False},   # y center of profile
-                       'logmass': {'init': 11.1, 'min':   8, 'max': 12, 'fit': False},   # log_10(M) [solMass]
-                       'effrad':  {'init':    5, 'min': 0.5, 'max': 10, 'fit': False},   # R_E; effective radius [kpc]
-                       'axisrat': {'init':'p01', 'min': 0.5, 'max':0.95,'fit': False},   # axis ratio []
-                       'theta':   {'init':  0.0, 'min':-180, 'max':180, 'fit': False},   # position angle [deg]
+                       'logmass': {'init': 11.1, 'min':   8, 'max': 12, 'fit': False},  # log_10(M) [solMass]
+                       'effrad':  {'init':    5, 'min': 0.5, 'max': 10, 'fit': False},  # R_E; effective radius [kpc]
+                       'axisrat': {'init':'p01', 'min': 0.5, 'max':0.95,'fit': False},  # axis ratio []
+                       'theta':   {'init':  0.0, 'min':-180, 'max':180, 'fit': False},  # position angle [deg]
                        'add': True}],
               'mult': [ # multipoles
                       {'m': 1,  # m num
-                       'x0':    {'init':0.0, 'min':-0.1, 'max': 0.1, 'fit': False},   # x center of profile 
-                       'y0':    {'init':0.0, 'min':-0.1, 'max': 0.1, 'fit': False},   # y center of profile
+                       'x0':    {'init':0.0, 'min':-0.1, 'max': 0.1, 'fit': False},     # x center of profile 
+                       'y0':    {'init':0.0, 'min':-0.1, 'max': 0.1, 'fit': False},     # y center of profile
                        'norm':  {'init':5e-3, 'min': 0.0, 'max':0.05, 'fit': False},    # normalization []
-                       'slope': {'init': 2.0, 'min': 2.0, 'max': 2.0, 'fit': False},   # slope []
-                       'theta': {'init':0.0, 'min': 0.0, 'max': 90,  'fit': False},    # position angle [deg]
+                       'slope': {'init': 2.0, 'min': 2.0, 'max': 2.0, 'fit': False},    # slope []
+                       'theta': {'init':0.0, 'min': 0.0, 'max': 90,  'fit': False},     # position angle [deg]
                        'add': True},
                       {'m': 3,  # m num
                        'x0':    {'init':'p02', 'min':-0.1, 'max': 0.1, 'fit': False},   # x center of profile 
                        'y0':    {'init':'p02', 'min':-0.1, 'max': 0.1, 'fit': False},   # y center of profile
-                       'norm':  {'init': 5e-3, 'min': 0.0, 'max':0.05, 'fit': False},    # normalization []
+                       'norm':  {'init': 5e-3, 'min': 0.0, 'max':0.05, 'fit': False},   # normalization []
                        'slope': {'init':  2.0, 'min': 2.0, 'max': 2.0, 'fit': False},   # slope []
                        'theta': {'init':  0.0, 'min': -180,'max': 180, 'fit': False},   # position angle [deg]
                        'add': True},
                       {'m': 4,  # m num
                        'x0':    {'init':'p02', 'min':-0.1, 'max': 0.1, 'fit': False},   # x center of profile 
                        'y0':    {'init':'p02', 'min':-0.1, 'max': 0.1, 'fit': False},   # y center of profile
-                       'norm':  {'init': 5e-3, 'min': 0.0, 'max':0.05, 'fit': False},    # normalization []
+                       'norm':  {'init': 5e-3, 'min': 0.0, 'max':0.05, 'fit': False},   # normalization []
                        'slope': {'init':  2.0, 'min': 2.0, 'max': 2.0, 'fit': False},   # slope []
                        'theta': {'init':  0.0, 'min': -180,'max': 180, 'fit': False},   # position angle [deg]
                        'add': True}],
               'ex': [# ex shear
-                    {'norm':  {'init': 1e-2, 'min': 0.0, 'max':0.03, 'fit': False},      # normalization []
-                     'theta': {'init': 0.0,  'min':-180, 'max': 180, 'fit': False},      # position angle [deg]
+                    {'norm':  {'init': 1e-2, 'min': 0.0, 'max':0.03, 'fit': False},     # normalization []
+                     'theta': {'init': 0.0,  'min':-180, 'max': 180, 'fit': False},     # position angle [deg]
                      'add': True}],
     }
     

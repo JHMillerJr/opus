@@ -1,0 +1,9 @@
+> genlookup_newt.py 
+
+> mdef: vir (cmr: c_vir)
+> grid: 30 x 30 x 60 x 13 x 13 (10140 models per cell)
+> zl tables to make: 30 (0 already exist)
+> workers: 128, nph: 50, target ER: 18.0 pix
+> tables: ./priors/newt_tables_cvir/
+
+[2026-10-22T18:53:50.953] error: *** JOB 4477943 ON cn1134 CANCELLED AT 2026-10-22T18:53:50 DUE to SIGNAL Terminated ***

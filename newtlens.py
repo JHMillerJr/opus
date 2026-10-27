@@ -375,6 +375,82 @@ def caustic_points(xg, yg, bprof, lamt):
     return np.column_stack((tx - ax, ty - ay)) # arcsec
 
 
+#> area enclosed by the tangential critical curve (longest lamt = 0 contour) [arcsec^2]
+def tcrit_area(xg, yg, lamt):
+    
+    #> imports
+    from skimage import measure
+    
+    #> lamt = 0 contours, (row, col) indices [pix]
+    cs = measure.find_contours(lamt, 0.0)
+    if len(cs) == 0 or len(max(cs, key=len)) < 4: return np.nan  # no (or unresolved) curve
+    
+    #> longest curve: pix --> arcsec
+    arc_pix = xg[0,1] - xg[0,0]                                  # arcsec/pix
+    return poly_area(max(cs, key=len) * arc_pix)                 # arcsec^2
+
+
+#> logarithmic slope g of the circularly averaged convergence at radius ER (kappa ~ theta^(1-g); SIS: g = 2) []
+def ring_slope(bprof, ER, frac=0.05, ntheta=64):
+    
+    #> no einstein radius
+    if not np.isfinite(ER) or ER <= 0: return np.nan
+    
+    #> circles just inside + outside ER (lens center at 0, 0)
+    phi  = np.linspace(0, 2*np.pi, ntheta, endpoint=False)    # rad
+    r    = ER*np.array([1 - frac, 1 + frac])                   # arcsec
+    x, y = r[:,None]*np.cos(phi)[None,:], r[:,None]*np.sin(phi)[None,:] # arcsec
+    
+    #> circularly averaged convergence on each circle
+    _, _, axx, axy, ayx, ayy = profiles.alpha_jac_points(x, y, bprof)
+    kap = (0.5*(axx + ayy)).mean(axis=1)
+    
+    #> slope between the two circles
+    return float(1 - np.log(kap[1]/kap[0]) / np.log(r[1]/r[0]))
+
+
+#> distance of each point to a closed polygon: nearest point on its segments [arcsec]
+def poly_dist(poly, pts, chunk=2000):
+    
+    #> segments P_k --> P_k+1 (closed)
+    d  = np.roll(poly, -1, axis=0) - poly      # (M, 2) arcsec
+    dd = np.sum(d**2, axis=1)                  # (M,) arcsec^2
+    dd = np.where(dd > 0, dd, 1.0)             # zero-length segments --> endpoint
+    
+    #> sources in chunks (bounded memory)
+    dist = np.empty(len(pts))
+    for i in range(0, len(pts), chunk):
+        
+        #> source relative to each segment start
+        rel = pts[i:i+chunk,None,:] - poly[None,:,:]        # (n, M, 2) arcsec
+        
+        #> fraction along each segment of the closest point, kept on the segment
+        t = np.clip(np.sum(rel*d[None], axis=2) / dd, 0, 1) # (n, M)
+        
+        #> distance to that closest point, nearest segment
+        near = rel - t[:,:,None]*d[None]                    # (n, M, 2) arcsec
+        dist[i:i+chunk] = np.min(np.hypot(near[:,:,0], near[:,:,1]), axis=1)
+    
+    return dist # arcsec
+
+
+#> returns the source's proximity to the tangential caustic
+def tcaus_prox(xg, yg, bprof, lamt, srcs):
+    
+    #> getting tcaus points
+    tcaus = caustic_points(xg, yg, bprof, lamt)
+    
+    #> no tangential caustic
+    if tcaus is None or len(tcaus) < 4: 
+        return np.full(len(srcs), np.nan), np.full(len(srcs), np.nan)
+    
+    #> distance to the caustic segments
+    dist = poly_dist(tcaus, np.asarray(srcs, dtype=float)) 
+    
+    #> dist and normalized dist
+    return dist, dist / np.sqrt(poly_area(tcaus))   # arcsec, []
+
+
 """ #> CAUSTIC AREAS =================
 ================================== """
 
@@ -505,6 +581,6 @@ if __name__ == '__main__':
     print('> '+os.path.basename(__file__),'\n')
     
     
-
+    
     # end
 # thank
